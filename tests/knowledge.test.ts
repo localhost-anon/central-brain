@@ -42,4 +42,12 @@ describe('knowledge lifecycle', () => {
     expect(used.lastUsedAt).toBeTruthy();
     expect(listLearnings(db)).toHaveLength(1);
   });
+
+  it('refuses to supersede a non-active fact', () => {
+    const db = createTestDb();
+    const old = addKnowledge(db, { scopeType: 'GLOBAL', statement: 'v1' });
+    const neu = supersedeKnowledge(db, old.id, { statement: 'v2' });
+    expect(() => supersedeKnowledge(db, old.id, { statement: 'v3' })).toThrow(/non-active/i);
+    expect(listKnowledge(db).map(k => k.id)).toEqual([neu.id]);
+  });
 });

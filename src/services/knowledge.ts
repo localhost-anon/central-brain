@@ -48,6 +48,7 @@ export function supersedeKnowledge(db: BrainDb, oldId: number, input: {
   statement: string; confidence?: number; sourceType?: string; sourceReference?: string;
 }): Knowledge {
   const old = getKnowledge(db, oldId);
+  if (old.status !== 'active') throw new Error(`Cannot supersede non-active knowledge ${oldId} (status: ${old.status})`);
   const neu = addKnowledge(db, {
     scopeType: old.scopeType, scopeId: old.scopeId ?? undefined,
     category: old.category ?? undefined, statement: input.statement,
