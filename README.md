@@ -8,3 +8,7 @@ Persistent goal-oriented memory for Claude Code. See ARCHITECTURE.md.
 - Hook: `hooks/session-start.sh` injects `brain context get` into every session
 - Backup: `brain backup` → `~/.central-brain/backups/`
 - Tests: `npm test`
+- Scan: `brain project scan ~/Projects` (re-run anytime; idempotent)
+- Failures: `brain failure add|search|show|resolve|solution` (the §66 reuse loop)
+- Verification: `brain verify add|goal` (passing runs drive requirement status)
+- Resume: `brain goal resume GOAL-…` (contract, work state, next action)
