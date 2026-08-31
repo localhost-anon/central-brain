@@ -56,4 +56,30 @@ describe('brain CLI end-to-end', () => {
     brain('goal', 'lock', g.id);
     expect(() => brain('goal', 'complete', g.id)).toThrow();
   });
+
+  it('phase 2: scan, failure loop, verification, resume', { timeout: 120000 }, () => {
+    // scan a fixture workspace
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-e2e-scan-'));
+    fs.mkdirSync(path.join(ws, 'demo-api', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'demo-api', 'package.json'),
+      JSON.stringify({ name: 'demo-api', dependencies: { express: '^4.0.0' } }));
+    const scan = brain('project', 'scan', ws);
+    expect(scan.registered).toBe(1);
+
+    // failure loop
+    const g = brain('goal', 'create', 'Phase2 e2e goal');
+    const f = brain('failure', 'add', 'ETIMEDOUT calling qdrant', '-g', g.id, '--type', 'network');
+    brain('failure', 'solution', String(f.id), 'increase timeout to 30s', '--successful');
+    expect(brain('failure', 'show', String(f.id)).resolved).toBe(1);
+    expect(brain('failure', 'search', 'etimedout').length).toBe(1);
+
+    // verification drives requirement status; resume recommends completion
+    const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion');
+    brain('goal', 'lock', g.id);
+    brain('goal', 'start', g.id);
+    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--passed', '--command', 'true');
+    const state = brain('goal', 'resume', g.id);
+    expect(state.requirements[0].status).toBe('PASSED');
+    expect(state.nextRecommendedAction).toBe('All criteria passed — complete the goal');
+  });
 });

@@ -9,6 +9,10 @@ import * as decisions from '../services/decisions.js';
 import * as context from '../services/context.js';
 import { recommendModel, type Complexity } from '../services/model.js';
 import { search } from '../services/search.js';
+import { scanProjects } from '../services/scanner.js';
+import * as fail from '../services/failures.js';
+import { recordVerification, goalVerificationState } from '../services/verification.js';
+import { resumeGoal } from '../services/resume.js';
 
 function db(): BrainDb {
   const handle = openDb();
@@ -54,6 +58,8 @@ goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
 goal.command('complete <id>').option('--force')
   .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force }))));
+goal.command('resume <id>').description('Full resume state + next recommended action (§72)')
+  .action((id) => run(() => out(resumeGoal(db(), id))));
 
 const req = goal.command('requirement');
 req.command('add <goalId> <description>')
@@ -90,6 +96,8 @@ proj.command('add <name>').option('--path <rootPath>').option('-d, --description
   .action((name, o) => run(() => out(projects.addProject(db(), { name, rootPath: o.path, description: o.description }))));
 proj.command('list').action(() => run(() => out(projects.listProjects(db()))));
 proj.command('show <idOrName>').action((idOrName) => run(() => out(projects.getProject(db(), idOrName))));
+proj.command('scan <dir>').description('Discover and register projects under a directory (§54)')
+  .action((dir) => run(() => out(scanProjects(db(), dir))));
 
 const repo = program.command('repo');
 repo.command('add <name>').option('--project <projectId>').option('--path <path>')
@@ -163,6 +171,41 @@ ctx.command('search <query>').option('-n, --limit <n>')
   .action((query, o) => run(() => out(context.searchContext(db(), query, {
     limit: o.limit ? Number(o.limit) : undefined,
   }))));
+
+// ---- failures ----
+const failCmd = program.command('failure');
+failCmd.command('add <errorMessage>').option('-g, --goal <goalId>')
+  .option('--type <failureType>').option('--context <text>').option('--work-unit <id>')
+  .action((errorMessage, o) => run(() => out(fail.addFailure(db(), {
+    errorMessage, goalId: o.goal, failureType: o.type, context: o.context, workUnitId: o.workUnit,
+  }))));
+failCmd.command('search <query>').option('-n, --limit <n>')
+  .action((query, o) => run(() => out(fail.searchFailures(db(), query, {
+    limit: o.limit ? Number(o.limit) : undefined,
+  }))));
+failCmd.command('show <id>').action((id) => run(() => out(fail.getFailure(db(), Number(id)))));
+failCmd.command('resolve <id>').action((id) => run(() => out(fail.resolveFailure(db(), Number(id)))));
+failCmd.command('solution <failureId> <solution>').option('--successful')
+  .action((failureId, solution, o) => run(() => out(fail.addSolution(db(), Number(failureId), {
+    solution, successful: o.successful,
+  }))));
+
+// ---- verification ----
+const verifyCmd = program.command('verify');
+verifyCmd.command('add').requiredOption('-g, --goal <goalId>')
+  .option('-r, --requirement <id>').option('--type <verificationType>')
+  .option('--command <cmd>').option('--expected <text>').option('--actual <text>')
+  .option('--passed').option('--failed')
+  .action((o) => run(() => {
+    if (o.passed === o.failed) throw new Error('Specify exactly one of --passed or --failed');
+    out(recordVerification(db(), {
+      passed: Boolean(o.passed), goalId: o.goal,
+      requirementId: o.requirement ? Number(o.requirement) : undefined,
+      verificationType: o.type, command: o.command,
+      expectedResult: o.expected, actualResult: o.actual,
+    }));
+  }));
+verifyCmd.command('goal <goalId>').action((goalId) => run(() => out(goalVerificationState(db(), goalId))));
 
 // ---- model routing ----
 const modelCmd = program.command('model');
