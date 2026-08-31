@@ -1,5 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { and, eq } from 'drizzle-orm';
+import type { BrainDb } from '../db/connection.js';
+import { knowledge, projects, repositories } from '../db/schema.js';
+import { slugify } from '../ids.js';
+import { addKnowledge, supersedeKnowledge, verifyKnowledge } from './knowledge.js';
+import { addProject, addRepo, getProject } from './projects.js';
 
 export interface ProjectInfo {
   name: string;
@@ -66,4 +72,50 @@ export function discoverProjects(rootDir: string): ProjectInfo[] {
     }
   }
   return found;
+}
+
+export interface ScanResult { registered: number; updated: number; projects: string[] }
+
+function seedFact(db: BrainDb, scopeId: string, category: string, statement: string): void {
+  const existing = db.select().from(knowledge).where(and(
+    eq(knowledge.scopeId, scopeId),
+    eq(knowledge.category, category),
+    eq(knowledge.sourceType, 'scan'),
+    eq(knowledge.status, 'active'),
+  )).get();
+  if (!existing) {
+    addKnowledge(db, { scopeType: 'PROJECT', scopeId, category, statement, sourceType: 'scan' });
+  } else if (existing.statement === statement) {
+    verifyKnowledge(db, existing.id);
+  } else {
+    supersedeKnowledge(db, existing.id, { statement, sourceType: 'scan' });
+  }
+}
+
+export function scanProjects(db: BrainDb, rootDir: string): ScanResult {
+  const infos = discoverProjects(rootDir);
+  let registered = 0;
+  let updated = 0;
+  for (const p of infos) {
+    const id = slugify(p.name);
+    if (!id) continue; // unslugifiable name: skip rather than register an empty id
+    let projectId: string;
+    try {
+      projectId = getProject(db, id).id;
+      db.update(projects).set({ rootPath: p.path, updatedAt: new Date().toISOString() })
+        .where(eq(projects.id, id)).run();
+      updated++;
+    } catch {
+      projectId = addProject(db, { name: p.name, rootPath: p.path }).id;
+      registered++;
+    }
+    if (p.hasGit && !db.select().from(repositories).where(eq(repositories.id, id)).get()) {
+      addRepo(db, { name: p.name, projectId, path: p.path, language: p.language, framework: p.framework });
+    }
+    const scope = `project:${projectId}`;
+    if (p.language) seedFact(db, scope, 'language', `Language: ${p.language}`);
+    if (p.framework) seedFact(db, scope, 'framework', `Framework: ${p.framework}`);
+    if (p.packageManager) seedFact(db, scope, 'package-manager', `Package manager: ${p.packageManager}`);
+  }
+  return { registered, updated, projects: infos.map(i => i.name) };
 }
