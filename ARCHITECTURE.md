@@ -899,7 +899,7 @@ search(query, { scopes?, types?, limit? }) → ranked results
 ```
 
 Backend v1: SQLite FTS5.
-Backend v2 (later phase): hybrid FTS5 + semantic retrieval via the existing self-hosted embeddings endpoint and Qdrant. The interface must not change when the backend does.
+Backend v2 (Phase 3, amended 2026-08-31): hybrid FTS5 + semantic retrieval using **local ONNX embeddings** (fastembed / bge-small-en-v1.5, in-process, no server) with vectors stored in brain.db (`embeddings` table, Float32 BLOBs) and brute-force cosine top-k merged with FTS5 via reciprocal-rank fusion. This replaces the earlier Qdrant + hosted-embeddings idea — zero external dependencies, consistent with §17's zero-infrastructure principle. The interface must not change when the backend does; sqlite-vec or a remote backend remain future swaps.
 
 ---
 
@@ -2796,7 +2796,7 @@ Brain MCP    brain CLI
       SQLite
 ```
 
-Phase 3 instead: retire claude-mem (§2.4), optional one-time import of valuable claude-mem observations, and hybrid semantic search (FTS5 + embeddings/Qdrant behind the §17.3 interface).
+Phase 3 instead: retire claude-mem (§2.4 — done), one-time import of claude-mem observations (~10.8k rows in ~/.claude-mem/claude-mem.db), and hybrid semantic search via local ONNX embeddings (§17.3 backend v2 — no Qdrant, no hosted endpoint).
 
 ---
 
