@@ -33,9 +33,16 @@ export function getWorkUnit(db: BrainDb, id: string): WorkUnit {
   return wu;
 }
 
+const VALID_WORK_UNIT_STATUSES = [
+  'PENDING', 'READY', 'RUNNING', 'VERIFYING', 'COMPLETED', 'FAILED', 'BLOCKED', 'SKIPPED',
+];
+
 export function updateWorkUnit(db: BrainDb, id: string, patch: {
   status?: string; title?: string; description?: string; priority?: number;
 }): WorkUnit {
+  if (patch.status !== undefined && !VALID_WORK_UNIT_STATUSES.includes(patch.status)) {
+    throw new Error(`Invalid work unit status: ${patch.status}`);
+  }
   const wu = getWorkUnit(db, id);
   const set: Partial<typeof workUnits.$inferInsert> = { ...patch };
   if (patch.status === 'RUNNING') {

@@ -52,10 +52,17 @@ export function listRequirements(db: BrainDb, goalId: string): Requirement[] {
   return db.select().from(goalRequirements).where(eq(goalRequirements.goalId, goalId)).all();
 }
 
+const VALID_REQUIREMENT_TYPES = [
+  'objective', 'constraint', 'success_criterion', 'exclusion', 'assumption',
+];
+
 export function addRequirement(
   db: BrainDb, goalId: string,
   input: { type: string; description: string; priority?: 'required' | 'optional' },
 ): Requirement {
+  if (!VALID_REQUIREMENT_TYPES.includes(input.type)) {
+    throw new Error(`Invalid requirement type: ${input.type}`);
+  }
   const g = getGoal(db, goalId);
   if (g.lockedAt) throw new GoalLockedError(`Goal ${goalId} is locked; requirements are frozen (§18).`);
   const res = db.insert(goalRequirements).values({
@@ -66,10 +73,15 @@ export function addRequirement(
     .where(eq(goalRequirements.id, Number(res.lastInsertRowid))).get()!;
 }
 
+const VALID_REQUIREMENT_STATUSES = ['PENDING', 'PASSED', 'FAILED', 'NOT_APPLICABLE'];
+
 export function setRequirementStatus(
   db: BrainDb, requirementId: number,
   status: 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_APPLICABLE', reason?: string,
 ): void {
+  if (!VALID_REQUIREMENT_STATUSES.includes(status)) {
+    throw new Error(`Invalid requirement status: ${status}`);
+  }
   if (status === 'NOT_APPLICABLE' && !reason) {
     throw new Error('NOT_APPLICABLE requires a status reason (§19).');
   }
@@ -100,12 +112,14 @@ export function lockGoal(db: BrainDb, id: string): Goal {
 
 export function startGoal(db: BrainDb, id: string): Goal {
   const g = getGoal(db, id);
+  if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot start.`);
   if (!g.lockedAt) throw new Error(`Goal ${id} must be locked before starting (§10).`);
   return setStatus(db, id, 'EXECUTING', { startedAt: g.startedAt ?? now() });
 }
 
 export function blockGoal(db: BrainDb, id: string, reason: string): Goal {
-  getGoal(db, id);
+  const g = getGoal(db, id);
+  if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot block.`);
   db.insert(observations).values({
     goalId: id, scopeType: 'GOAL', scopeId: `goal:${id}`,
     observation: `Goal blocked: ${reason}`, createdAt: now(),
@@ -114,7 +128,8 @@ export function blockGoal(db: BrainDb, id: string, reason: string): Goal {
 }
 
 export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean } = {}): Goal {
-  getGoal(db, id);
+  const g = getGoal(db, id);
+  if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot complete.`);
   if (!opts.force) {
     const unmet = listRequirements(db, id).filter(r =>
       r.requirementType === 'success_criterion' && r.priority === 'required' &&

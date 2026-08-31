@@ -34,4 +34,11 @@ describe('work units', () => {
     const done = updateWorkUnit(db, wu.id, { status: 'COMPLETED' });
     expect(done.completedAt).toBeTruthy();
   });
+
+  it('rejects invalid status strings', () => {
+    const db = createTestDb();
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    const wu = createWorkUnit(db, { goalId: g.id, title: 'A' });
+    expect(() => updateWorkUnit(db, wu.id, { status: 'BOGUS' })).toThrow(/invalid/i);
+  });
 });

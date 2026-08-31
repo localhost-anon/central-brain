@@ -19,7 +19,7 @@ describe('brain MCP server', () => {
   it('exposes the brain_* tool surface', async () => {
     const client = await connect();
     const tools = (await client.listTools()).tools.map(t => t.name);
-    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend']) {
+    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve']) {
       expect(tools).toContain(t);
     }
   });

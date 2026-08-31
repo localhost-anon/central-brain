@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createTestDb } from './helpers.js';
+import { openDb, migrateDb } from '../src/db/connection.js';
 
 describe('database', () => {
   it('applies migrations: core and FTS tables exist', () => {
@@ -31,5 +32,11 @@ describe('database', () => {
   it('enforces WAL-compatible pragmas on file DBs and foreign keys everywhere', () => {
     const db = createTestDb();
     expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+
+  it('migrateDb on a fresh in-memory DB does not throw, and re-migrating is a no-op', () => {
+    const db = openDb(':memory:');
+    expect(() => migrateDb(db)).not.toThrow();
+    expect(() => migrateDb(db)).not.toThrow();
   });
 });

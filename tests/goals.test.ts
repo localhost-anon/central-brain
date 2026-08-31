@@ -61,4 +61,14 @@ describe('goals service', () => {
     expect(db.select().from(observations).all()[0].observation).toContain('AWS auth expired');
     expect(listGoals(db, { status: 'BLOCKED' })).toHaveLength(1);
   });
+
+  it('rejects invalid requirement types and terminal-state transitions', () => {
+    const db = createTestDb();
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    expect(() => addRequirement(db, g.id, { type: 'success-criteria', description: 'x' }))
+      .toThrow(/invalid/i);
+    lockGoal(db, g.id);
+    completeGoal(db, g.id, { force: true });
+    expect(() => blockGoal(db, g.id, 'late block')).toThrow(/cannot/i);
+  });
 });

@@ -46,7 +46,8 @@ export function buildServer(db: BrainDb): McpServer {
   }, (a) => goals.completeGoal(db, a.id, { force: a.force }));
   tool('brain_requirement_add', 'Add a requirement to an unlocked goal', {
     goalId: z.string(), description: z.string(),
-    type: z.string().default('success_criterion'),
+    type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption'])
+      .default('success_criterion'),
     priority: z.enum(['required', 'optional']).optional(),
   }, (a) => goals.addRequirement(db, a.goalId, a));
   tool('brain_requirement_set_status', 'Set requirement status (PENDING|PASSED|FAILED|NOT_APPLICABLE)', {
@@ -127,6 +128,20 @@ export function buildServer(db: BrainDb): McpServer {
     goalId: z.string().optional(),
     complexity: z.enum(['trivial', 'low', 'medium', 'high', 'critical']).optional(),
   }, (a) => recommendModel(db, a));
+
+  tool('brain_knowledge_supersede', 'Supersede a fact with a corrected/updated statement', {
+    id: z.number(), statement: z.string(), confidence: z.number().optional(),
+  }, (a) => knowledge.supersedeKnowledge(db, a.id, a));
+  tool('brain_approval_add', 'Record a pending approval for a risky/irreversible action', {
+    action: z.string(), riskLevel: z.string().default('IRREVERSIBLE'),
+    goalId: z.string().optional(), decisionId: z.number().optional(),
+  }, (a) => decisions.addApproval(db, a));
+  tool('brain_approval_resolve', 'Resolve a pending approval', {
+    id: z.number(), status: z.enum(['approved', 'denied']),
+  }, (a) => decisions.resolveApproval(db, a.id, a.status));
+  tool('brain_work_ready', 'List work units whose dependencies are satisfied and ready to run', {
+    goalId: z.string(),
+  }, (a) => work.readyWorkUnits(db, a.goalId));
 
   return server;
 }

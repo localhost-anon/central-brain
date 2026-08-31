@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { backupDb } from './backup.js';
 import * as schema from './schema.js';
 
 export type BrainDb = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
@@ -30,5 +31,16 @@ export function openDb(dbPath: string = resolveDbPath()): BrainDb {
 }
 
 export function migrateDb(db: BrainDb): void {
-  migrate(db, { migrationsFolder: path.join(packageRoot(), 'drizzle') });
+  const folder = path.join(packageRoot(), 'drizzle');
+  try {
+    const journal = JSON.parse(fs.readFileSync(path.join(folder, 'meta', '_journal.json'), 'utf8'));
+    const total = journal.entries.length;
+    const applied = (db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').get() as { n: number }).n;
+    if (applied > 0 && applied < total && db.$client.name !== ':memory:') {
+      backupDb(db);
+    }
+  } catch {
+    // fresh DB (no migrations table yet) or unreadable journal: nothing to protect
+  }
+  migrate(db, { migrationsFolder: folder });
 }
