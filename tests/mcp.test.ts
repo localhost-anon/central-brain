@@ -19,7 +19,7 @@ describe('brain MCP server', () => {
   it('exposes the brain_* tool surface', async () => {
     const client = await connect();
     const tools = (await client.listTools()).tools.map(t => t.name);
-    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve']) {
+    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve', 'brain_project_scan', 'brain_failure_search', 'brain_goal_resume']) {
       expect(tools).toContain(t);
     }
   });
@@ -46,5 +46,23 @@ describe('brain MCP server', () => {
     const res: any = await client.callTool({ name: 'brain_goal_get', arguments: { id: 'GOAL-9999-9999' } });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain('not found');
+  });
+
+  it('records failures and resumes goals via tools', async () => {
+    const client = await connect();
+    const g = text(await client.callTool({
+      name: 'brain_goal_create', arguments: { title: 'T', objective: 'O' },
+    }));
+    await client.callTool({
+      name: 'brain_failure_record',
+      arguments: { errorMessage: 'EADDRINUSE port 8020', goalId: g.id },
+    });
+    const hits = text(await client.callTool({
+      name: 'brain_failure_search', arguments: { query: 'eaddrinuse' },
+    }));
+    expect(hits).toHaveLength(1);
+    const state = text(await client.callTool({ name: 'brain_goal_resume', arguments: { id: g.id } }));
+    expect(state.unresolvedFailures).toHaveLength(1);
+    expect(state.nextRecommendedAction).toMatch(/lock the goal contract/i);
   });
 });

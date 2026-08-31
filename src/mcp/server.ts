@@ -10,6 +10,10 @@ import * as decisions from '../services/decisions.js';
 import * as context from '../services/context.js';
 import { recommendModel } from '../services/model.js';
 import { search, type SearchType } from '../services/search.js';
+import { scanProjects } from '../services/scanner.js';
+import * as fail from '../services/failures.js';
+import { goalVerificationState, recordVerification } from '../services/verification.js';
+import { resumeGoal } from '../services/resume.js';
 
 export function buildServer(db: BrainDb): McpServer {
   const server = new McpServer({ name: 'central-brain', version: '0.1.0' });
@@ -142,6 +146,35 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_work_ready', 'List work units whose dependencies are satisfied and ready to run', {
     goalId: z.string(),
   }, (a) => work.readyWorkUnits(db, a.goalId));
+
+  // phase 2: scanner, failures, verification, resume
+  tool('brain_project_scan', 'Discover and register projects under a directory (§54)', {
+    dir: z.string(),
+  }, (a) => scanProjects(db, a.dir));
+  tool('brain_failure_record', 'Record a failure (§31)', {
+    errorMessage: z.string(), goalId: z.string().optional(), workUnitId: z.string().optional(),
+    failureType: z.string().optional(), context: z.string().optional(),
+  }, (a) => fail.addFailure(db, a));
+  tool('brain_failure_search', 'Have I seen this error before? FTS over failures (§66)', {
+    query: z.string(), limit: z.number().optional(),
+  }, (a) => fail.searchFailures(db, a.query, a));
+  tool('brain_failure_resolve', 'Mark a failure resolved', { id: z.number() },
+    (a) => fail.resolveFailure(db, a.id));
+  tool('brain_failure_solution_add', 'Attach a solution to a failure; successful:true also resolves it', {
+    failureId: z.number(), solution: z.string(), successful: z.boolean().optional(),
+  }, (a) => fail.addSolution(db, a.failureId, a));
+  tool('brain_verification_record', 'Record a verification run; linked requirement moves to PASSED/FAILED (§35)', {
+    passed: z.boolean(), goalId: z.string().optional(), workUnitId: z.string().optional(),
+    requirementId: z.number().optional(), verificationType: z.string().optional(),
+    command: z.string().optional(), expectedResult: z.string().optional(),
+    actualResult: z.string().optional(),
+  }, (a) => recordVerification(db, a));
+  tool('brain_verification_state', 'Requirements with their verification runs for a goal', {
+    goalId: z.string(),
+  }, (a) => goalVerificationState(db, a.goalId));
+  tool('brain_goal_resume', 'Full resume state + next recommended action (§72)', {
+    id: z.string(),
+  }, (a) => resumeGoal(db, a.id));
 
   return server;
 }
