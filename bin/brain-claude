@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launch Claude Code Brain-recommended model (ARCHITECTURE.md §12.1).
+MODEL=$(node $HOME/Projects/central-brain/dist/cli/index.js model recommend 2>/dev/null \
+  | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).model)}catch{process.stdout.write('sonnet')}})")
+exec claude --model "${MODEL:-sonnet}" "$@"
