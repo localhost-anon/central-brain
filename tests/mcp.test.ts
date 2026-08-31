@@ -1,0 +1,50 @@
+import { describe, it, expect } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createTestDb } from './helpers.js';
+import { buildServer } from '../src/mcp/server.js';
+
+async function connect() {
+  const db = createTestDb();
+  const server = buildServer(db);
+  const client = new Client({ name: 'test', version: '0.0.0' });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  return client;
+}
+
+const text = (res: any) => JSON.parse(res.content[0].text);
+
+describe('brain MCP server', () => {
+  it('exposes the brain_* tool surface', async () => {
+    const client = await connect();
+    const tools = (await client.listTools()).tools.map(t => t.name);
+    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend']) {
+      expect(tools).toContain(t);
+    }
+  });
+
+  it('creates, locks, and retrieves context for a goal via tools', async () => {
+    const client = await connect();
+    const g = text(await client.callTool({
+      name: 'brain_goal_create',
+      arguments: { title: 'Add SSO', objective: 'MS auth works' },
+    }));
+    expect(g.id).toMatch(/^GOAL-/);
+    await client.callTool({
+      name: 'brain_requirement_add',
+      arguments: { goalId: g.id, description: 'login works', type: 'success_criterion' },
+    });
+    await client.callTool({ name: 'brain_goal_lock', arguments: { id: g.id } });
+    const ctx = text(await client.callTool({ name: 'brain_context_get', arguments: {} }));
+    expect(ctx.goal.id).toBe(g.id);
+    expect(ctx.requirements).toHaveLength(1);
+  });
+
+  it('surfaces service errors as tool errors', async () => {
+    const client = await connect();
+    const res: any = await client.callTool({ name: 'brain_goal_get', arguments: { id: 'GOAL-9999-9999' } });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('not found');
+  });
+});
