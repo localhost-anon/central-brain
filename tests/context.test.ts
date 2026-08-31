@@ -39,6 +39,7 @@ describe('context engine', () => {
     expect(ctx.goal?.id).toBe(g.id);
     const total = ctx.decisions.length + ctx.knowledge.length + ctx.learnings.length + ctx.relatedGoals.length;
     expect(total).toBeLessThanOrEqual(10);
+    expect(total).toBe(10); // 50 knowledge rows available — budget must be fully consumed
   });
 
   it('returns global-only context when no goal is active', () => {

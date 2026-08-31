@@ -63,15 +63,11 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
   ];
   const per = Math.floor(budget / cats.length);
   const caps = cats.map(c => Math.min(c.rows.length, per));
-  let used = caps.reduce((a, b) => a + b, 0);
-  const remain = budget - used;
-
-  // Distribute remaining budget to categories with leftover rows.
-  for (let i = 0; i < remain && i < cats.length; i++) {
-    if (caps[i]! < cats[i]!.rows.length) {
-      caps[i]!++;
-      used++;
-    }
+  let remaining = budget - caps.reduce((s, n) => s + n, 0);
+  for (let i = 0; i < cats.length && remaining > 0; i++) {
+    const extra = Math.min(remaining, cats[i]!.rows.length - caps[i]!);
+    caps[i]! += extra;
+    remaining -= extra;
   }
 
   return {
@@ -86,6 +82,6 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
   };
 }
 
-export function searchContext(db: BrainDb, query: string, opts?: { limit?: number }): SearchResult[] {
-  return search(db, query, opts);
+export function searchContext(db: BrainDb, query: string, opts: { limit?: number } = {}): SearchResult[] {
+  return search(db, query, { limit: opts.limit ?? 20 });
 }
