@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { verificationRuns } from '../db/schema.js';
+import { verificationRuns, goalRequirements } from '../db/schema.js';
 import { listRequirements, setRequirementStatus, type Requirement } from './goals.js';
 
 export type VerificationRun = typeof verificationRuns.$inferSelect;
@@ -11,6 +11,14 @@ export function recordVerification(db: BrainDb, input: {
   passed: boolean; goalId?: string; workUnitId?: string; requirementId?: number;
   verificationType?: string; command?: string; expectedResult?: string; actualResult?: string;
 }): VerificationRun {
+  if (input.requirementId !== undefined) {
+    const req = db.select().from(goalRequirements)
+      .where(eq(goalRequirements.id, input.requirementId)).get();
+    if (!req) throw new Error(`Requirement not found: ${input.requirementId}`);
+    if (input.goalId !== undefined && req.goalId !== input.goalId) {
+      throw new Error(`Requirement ${input.requirementId} belongs to ${req.goalId}, not ${input.goalId}`);
+    }
+  }
   const res = db.insert(verificationRuns).values({
     passed: input.passed ? 1 : 0, goalId: input.goalId ?? null,
     workUnitId: input.workUnitId ?? null, requirementId: input.requirementId ?? null,

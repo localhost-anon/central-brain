@@ -71,4 +71,14 @@ describe('scanProjects', () => {
     expect(res.errors).toHaveLength(0);
     expect(listProjects(db)).toHaveLength(1);
   });
+
+  it('reports registered projects whose directory vanished', () => {
+    const db = createTestDb();
+    const root = makeWorkspace();
+    scanProjects(db, root);
+    fs.rmSync(path.join(root, 'my-app'), { recursive: true, force: true });
+    const res = scanProjects(db, root);
+    expect(res.missing).toHaveLength(1);
+    expect(res.missing[0]).toContain('my-app');
+  });
 });

@@ -50,7 +50,9 @@ export function detectProject(dir: string): Omit<ProjectInfo, 'name'> | null {
 }
 
 function childDirs(dir: string): string[] {
-  return fs.readdirSync(dir).filter(e => {
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  return entries.filter(e => {
     if (SKIP.has(e) || e.startsWith('.')) return false;
     try { return fs.statSync(path.join(dir, e)).isDirectory(); } catch { return false; }
   });
@@ -80,6 +82,7 @@ export interface ScanResult {
   projects: string[];
   collisions: string[];
   errors: string[];
+  missing: string[];
 }
 
 function seedFact(db: BrainDb, scopeId: string, category: string, statement: string): void {
@@ -141,5 +144,12 @@ export function scanProjects(db: BrainDb, rootDir: string): ScanResult {
       errors.push(`${p.name}: ${(e as Error).message}`);
     }
   }
-  return { registered, updated, projects: infos.map(i => i.name), collisions, errors };
+  const missing: string[] = [];
+  const resolvedRoot = path.resolve(rootDir);
+  for (const proj of db.select().from(projects).all()) {
+    if (proj.rootPath && proj.rootPath.startsWith(resolvedRoot) && !fs.existsSync(proj.rootPath)) {
+      missing.push(`${proj.name} (${proj.rootPath})`);
+    }
+  }
+  return { registered, updated, projects: infos.map(i => i.name), collisions, errors, missing };
 }

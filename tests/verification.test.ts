@@ -34,4 +34,15 @@ describe('verification service', () => {
     expect(state.requirements.find(x => x.id === r1.id)!.runs).toHaveLength(1);
     expect(listVerifications(db, { goalId: g.id })).toHaveLength(1);
   });
+
+  it('rejects dangling or cross-goal requirement ids', () => {
+    const db = createTestDb();
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    expect(() => recordVerification(db, { passed: true, goalId: g.id, requirementId: 999 }))
+      .toThrow(/not found/i);
+    const other = createGoal(db, { title: 'other', objective: 'o' });
+    const r = addRequirement(db, other.id, { type: 'success_criterion', description: 'x' });
+    expect(() => recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id }))
+      .toThrow(/belongs to/i);
+  });
 });
