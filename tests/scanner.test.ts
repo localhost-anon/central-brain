@@ -25,9 +25,9 @@ beforeAll(() => {
   mk('workspace/sub-go/go.mod', 'module example.com/sub');
   // plain dir with no markers anywhere
   fs.mkdirSync(path.join(root, 'plain-dir', 'stuff'), { recursive: true });
-  // noise that must be skipped
-  fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true });
-  fs.mkdirSync(path.join(root, '.hidden'), { recursive: true });
+  // noise dirs get real markers so a broken skip-list would surface them
+  mk('node_modules/x/package.json', '{}');
+  mk('.hidden/package.json', '{}');
 });
 
 describe('scanner detection', () => {
