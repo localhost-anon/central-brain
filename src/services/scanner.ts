@@ -74,7 +74,13 @@ export function discoverProjects(rootDir: string): ProjectInfo[] {
   return found;
 }
 
-export interface ScanResult { registered: number; updated: number; projects: string[] }
+export interface ScanResult {
+  registered: number;
+  updated: number;
+  projects: string[];
+  collisions: string[];
+  errors: string[];
+}
 
 function seedFact(db: BrainDb, scopeId: string, category: string, statement: string): void {
   const existing = db.select().from(knowledge).where(and(
@@ -96,26 +102,44 @@ export function scanProjects(db: BrainDb, rootDir: string): ScanResult {
   const infos = discoverProjects(rootDir);
   let registered = 0;
   let updated = 0;
+  const collisions: string[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
   for (const p of infos) {
     const id = slugify(p.name);
     if (!id) continue; // unslugifiable name: skip rather than register an empty id
-    let projectId: string;
+    if (seen.has(id)) {
+      collisions.push(`${p.name} -> ${id} (already claimed this run)`);
+      continue;
+    }
+    seen.add(id);
     try {
-      projectId = getProject(db, id).id;
-      db.update(projects).set({ rootPath: p.path, updatedAt: new Date().toISOString() })
-        .where(eq(projects.id, id)).run();
-      updated++;
-    } catch {
-      projectId = addProject(db, { name: p.name, rootPath: p.path }).id;
-      registered++;
+      let existing;
+      try { existing = getProject(db, id); } catch { existing = undefined; }
+      let projectId: string;
+      if (existing) {
+        if (existing.name !== p.name) {
+          collisions.push(`${p.name} -> ${id} (held by ${existing.name})`);
+          continue;
+        }
+        db.update(projects).set({ rootPath: p.path, updatedAt: new Date().toISOString() })
+          .where(eq(projects.id, id)).run();
+        projectId = existing.id;
+        updated++;
+      } else {
+        projectId = addProject(db, { name: p.name, rootPath: p.path }).id;
+        registered++;
+      }
+      if (p.hasGit && !db.select().from(repositories).where(eq(repositories.id, id)).get()) {
+        addRepo(db, { name: p.name, projectId, path: p.path, language: p.language, framework: p.framework });
+      }
+      const scope = `project:${projectId}`;
+      if (p.language) seedFact(db, scope, 'language', `Language: ${p.language}`);
+      if (p.framework) seedFact(db, scope, 'framework', `Framework: ${p.framework}`);
+      if (p.packageManager) seedFact(db, scope, 'package-manager', `Package manager: ${p.packageManager}`);
+    } catch (e) {
+      errors.push(`${p.name}: ${(e as Error).message}`);
     }
-    if (p.hasGit && !db.select().from(repositories).where(eq(repositories.id, id)).get()) {
-      addRepo(db, { name: p.name, projectId, path: p.path, language: p.language, framework: p.framework });
-    }
-    const scope = `project:${projectId}`;
-    if (p.language) seedFact(db, scope, 'language', `Language: ${p.language}`);
-    if (p.framework) seedFact(db, scope, 'framework', `Framework: ${p.framework}`);
-    if (p.packageManager) seedFact(db, scope, 'package-manager', `Package manager: ${p.packageManager}`);
   }
-  return { registered, updated, projects: infos.map(i => i.name) };
+  return { registered, updated, projects: infos.map(i => i.name), collisions, errors };
 }

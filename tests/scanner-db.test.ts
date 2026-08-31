@@ -56,4 +56,19 @@ describe('scanProjects', () => {
     const all = listKnowledge(db, { scopeId: 'project:my-app', includeInactive: true });
     expect(all.find(k => k.statement === 'Framework: express')!.status).toBe('superseded');
   });
+
+  it('slug collisions are skipped loudly and the scan continues', () => {
+    const db = createTestDb();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-scandb-'));
+    for (const rel of ['a/b-c', 'a-b/c']) {
+      const d = path.join(root, rel);
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{}');
+    }
+    const res = scanProjects(db, root);
+    expect(res.registered).toBe(1);
+    expect(res.collisions).toHaveLength(1);
+    expect(res.errors).toHaveLength(0);
+    expect(listProjects(db)).toHaveLength(1);
+  });
 });
