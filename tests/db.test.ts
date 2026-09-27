@@ -3,7 +3,7 @@ import { createTestDb } from './helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openDb, migrateDb, pendingMigrations, snapshotDir } from '../src/db/connection.js';
+import { openDb, migrateDb, pendingMigrations, appliedMigrations, snapshotDir } from '../src/db/connection.js';
 import { createGoal } from '../src/services/goals.js';
 
 describe('database', () => {
@@ -85,5 +85,16 @@ describe('database', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-snap-'));
     const db = openDb(path.join(dir, 'brain.db'));
     expect(snapshotDir(db)).toBe(path.join(dir, 'backups'));
+  });
+});
+
+describe('appliedMigrations guard', () => {
+  it('returns 0 only for a missing migrations table; rethrows other errors', () => {
+    const fresh = openDb(':memory:');
+    expect(appliedMigrations(fresh)).toBe(0);
+    const db = createTestDb();
+    expect(appliedMigrations(db)).toBeGreaterThan(0);
+    db.$client.close();
+    expect(() => appliedMigrations(db)).toThrow();
   });
 });

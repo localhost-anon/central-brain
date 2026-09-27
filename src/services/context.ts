@@ -1,6 +1,4 @@
-import { and, eq } from 'drizzle-orm';
-import type { BrainDb } from '../db/connection.js';
-import { goalQuestions } from '../db/schema.js';
+import { pendingMigrations, type BrainDb } from '../db/connection.js';
 import type { Goal } from './goals.js';
 import type { Requirement } from './goals.js';
 import type { WorkUnit } from './work.js';
@@ -9,7 +7,7 @@ import type { Learning } from './knowledge.js';
 import type { Decision } from './decisions.js';
 import type { ModelRouting } from './model.js';
 import type { SearchResult } from './search.js';
-import { currentGoal, getGoal, listRequirements, listGoals } from './goals.js';
+import { currentGoal, getGoal, listRequirements, listGoals, openMaterialQuestions as openQuestionsFor } from './goals.js';
 import { listWorkUnits } from './work.js';
 import { listKnowledge, listLearnings } from './knowledge.js';
 import { listDecisions } from './decisions.js';
@@ -60,11 +58,11 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
   let openMaterialQuestions = 0;
   if (goal) {
     try {
-      openMaterialQuestions = db.select().from(goalQuestions).where(and(
-        eq(goalQuestions.goalId, goal.id), eq(goalQuestions.status, 'pending'), eq(goalQuestions.materiality, 'material'),
-      )).all().length;
-    } catch {
-      openMaterialQuestions = 0; // schema pending (passive path) — columns may not exist yet
+      openMaterialQuestions = openQuestionsFor(db, goal.id).length;
+    } catch (err) {
+      // Only a pending schema (passive path, columns may not exist yet) is tolerated.
+      if (pendingMigrations(db) === 0) throw err;
+      openMaterialQuestions = 0;
     }
   }
 

@@ -58,3 +58,12 @@ describe('context engine', () => {
     expect(searchContext(db, 'seafile')[0].type).toBe('knowledge');
   });
 });
+
+describe('open-question count error handling', () => {
+  it('rethrows query errors when no migrations are pending', () => {
+    const db = createTestDb();
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    db.$client.exec('DROP TABLE goal_questions');
+    expect(() => getContext(db, { goalId: g.id })).toThrow(/goal_questions/);
+  });
+});

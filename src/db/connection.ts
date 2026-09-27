@@ -26,8 +26,11 @@ function migrationsFolder(): string {
 export function appliedMigrations(db: BrainDb): number {
   try {
     return (db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').get() as { n: number }).n;
-  } catch {
-    return 0; // fresh DB: migrations table does not exist yet
+  } catch (err) {
+    // Fresh DB: migrations table does not exist yet. Anything else must surface, or a passive
+    // path could run migrateDb on an existing DB without taking a snapshot first.
+    if (err instanceof Error && err.message.includes('no such table')) return 0;
+    throw err;
   }
 }
 
