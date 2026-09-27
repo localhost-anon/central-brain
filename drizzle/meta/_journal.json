@@ -15,6 +15,20 @@
       "when": 1788114846817,
       "tag": "0001_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790535706098,
+      "tag": "0002_funny_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790535710687,
+      "tag": "0003_observations_fts",
+      "breakpoints": true
     }
   ]
 }

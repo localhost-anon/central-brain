@@ -39,4 +39,15 @@ describe('database', () => {
     expect(() => migrateDb(db)).not.toThrow();
     expect(() => migrateDb(db)).not.toThrow();
   });
+
+  it('observations FTS table indexes inserted rows', () => {
+    const db = createTestDb();
+    db.$client.prepare(
+      "INSERT INTO observations (observation, created_at) VALUES ('truenas hosts seafile', ?)"
+    ).run(new Date().toISOString());
+    const hits = db.$client.prepare(
+      "SELECT rowid FROM observations_fts WHERE observations_fts MATCH 'seafile'"
+    ).all();
+    expect(hits.length).toBe(1);
+  });
 });

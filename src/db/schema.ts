@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, blob, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const goals = sqliteTable('goals', {
   id: text('id').primaryKey(),
@@ -159,6 +159,7 @@ export const observations = sqliteTable('observations', {
   scopeId: text('scope_id'),
   observation: text('observation').notNull(),
   confidence: real('confidence').notNull().default(1),
+  sourceRef: text('source_ref'),
   createdAt: text('created_at').notNull(),
 });
 
@@ -218,3 +219,13 @@ export const verificationRuns = sqliteTable('verification_runs', {
   passed: integer('passed'),
   createdAt: text('created_at').notNull(),
 });
+
+export const embeddings = sqliteTable('embeddings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sourceType: text('source_type').notNull(),
+  sourceId: text('source_id').notNull(),
+  model: text('model').notNull(),
+  contentHash: text('content_hash').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+  createdAt: text('created_at').notNull(),
+}, (t) => [uniqueIndex('embeddings_source_model').on(t.sourceType, t.sourceId, t.model)]);
