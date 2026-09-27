@@ -68,7 +68,12 @@ goal.command('show <id>').action((id) => run(() => {
   out({ ...goals.getGoal(d, id), requirements: goals.listRequirements(d, id) });
 }));
 goal.command('current').action(() => run(() => out(goals.currentGoal(db()) ?? null)));
-goal.command('lock <id>').action((id) => run(() => out(goals.lockGoal(db(), id))));
+goal.command('lock <id>').option('--force', 'lock despite contract gaps (requires --reason)')
+  .option('--reason <text>', 'why force-locking is acceptable (recorded as a decision)')
+  .action((id, o) => run(() => out(goals.lockGoal(db(), id, { force: o.force, reason: o.reason }))));
+goal.command('set <id>').description('Set contract fields on an unlocked goal')
+  .option('--risk <level>', 'LOW|MEDIUM|HIGH|IRREVERSIBLE').option('--autonomy <level>')
+  .action((id, o) => run(() => out(goals.setGoalFields(db(), id, { riskLevel: o.risk, autonomyLevel: o.autonomy }))));
 goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id))));
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
 goal.command('complete <id>').option('--force')
@@ -78,7 +83,7 @@ goal.command('resume <id>').description('Full resume state + next recommended ac
 
 const req = goal.command('requirement');
 req.command('add <goalId> <description>')
-  .option('-t, --type <type>', 'objective|constraint|success_criterion|exclusion|assumption', 'success_criterion')
+  .option('-t, --type <type>', 'objective|constraint|success_criterion|exclusion|assumption|scope|permission', 'success_criterion')
   .option('-p, --priority <p>', 'required|optional', 'required')
   .action((goalId, description, o) => run(() =>
     out(goals.addRequirement(db(), goalId, { type: o.type, description, priority: o.priority }))));

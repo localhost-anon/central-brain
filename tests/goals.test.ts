@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb } from './helpers.js';
+import { createTestDb, makeLockable } from './helpers.js';
 import {
   createGoal, getGoal, listGoals, currentGoal, addRequirement,
   setRequirementStatus, lockGoal, startGoal, blockGoal, completeGoal,
@@ -19,12 +19,13 @@ describe('goals service', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Add SSO', objective: 'MS auth works' });
     addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works' });
+    makeLockable(db, g.id);
     const locked = lockGoal(db, g.id);
     expect(locked.status).toBe('LOCKED');
     expect(locked.lockedAt).toBeTruthy();
     const snap = JSON.parse(locked.contractSnapshot!);
     expect(snap.objective).toBe('MS auth works');
-    expect(snap.requirements).toHaveLength(1);
+    expect(snap.requirements).toHaveLength(2);
     expect(() => addRequirement(db, g.id, { type: 'constraint', description: 'late add' }))
       .toThrow(/locked/i);
   });
@@ -33,6 +34,7 @@ describe('goals service', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
     const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass' });
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     startGoal(db, g.id);
     expect(() => completeGoal(db, g.id)).toThrow(/tests pass/);
@@ -54,6 +56,7 @@ describe('goals service', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
     expect(currentGoal(db)).toBeUndefined(); // DRAFT is not active
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     expect(currentGoal(db)?.id).toBe(g.id);
     blockGoal(db, g.id, 'AWS auth expired');
@@ -67,6 +70,7 @@ describe('goals service', () => {
     const g = createGoal(db, { title: 't', objective: 'o' });
     expect(() => addRequirement(db, g.id, { type: 'success-criteria', description: 'x' }))
       .toThrow(/invalid/i);
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     completeGoal(db, g.id, { force: true });
     expect(() => blockGoal(db, g.id, 'late block')).toThrow(/cannot/i);

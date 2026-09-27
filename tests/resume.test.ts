@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb } from './helpers.js';
+import { createTestDb, makeLockable } from './helpers.js';
 import { createGoal, addRequirement, lockGoal, startGoal } from '../src/services/goals.js';
 import { createWorkUnit, updateWorkUnit } from '../src/services/work.js';
 import { addFailure } from '../src/services/failures.js';
@@ -11,6 +11,7 @@ describe('goal resume (§72)', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Ship feature', objective: 'o' });
     const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works' });
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     startGoal(db, g.id);
     const a = createWorkUnit(db, { goalId: g.id, title: 'Backend' });
@@ -33,6 +34,7 @@ describe('goal resume (§72)', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Draft goal', objective: 'o' });
     expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/lock the goal contract/i);
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/start the goal/i);
     expect(resumeGoal(db, g.id).contract).not.toBeNull();

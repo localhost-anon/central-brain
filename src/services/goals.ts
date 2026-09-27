@@ -1,7 +1,8 @@
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { goals, goalRequirements, observations } from '../db/schema.js';
+import { goals, goalRequirements, goalQuestions, observations } from '../db/schema.js';
 import { nextGoalId } from '../ids.js';
+import { addDecision } from './decisions.js';
 
 export type Goal = typeof goals.$inferSelect;
 export type Requirement = typeof goalRequirements.$inferSelect;
@@ -11,6 +12,20 @@ const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
 export class GoalLockedError extends Error {}
 export class IncompleteCriteriaError extends Error {}
+export type GoalQuestion = typeof goalQuestions.$inferSelect;
+export const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'IRREVERSIBLE'] as const;
+export class ContractIncompleteError extends Error {}
+export interface ContractGap { field: 'objective' | 'success_criterion' | 'scope' | 'risk_level'; message: string }
+export interface ContractCheck { ready: boolean; gaps: ContractGap[]; openQuestions: GoalQuestion[] }
+
+/** Case-insensitive; returns the canonical uppercase level (model routing already upper-cases). */
+function normaliseRiskLevel(level: string): string {
+  const up = level.trim().toUpperCase();
+  if (!(RISK_LEVELS as readonly string[]).includes(up)) {
+    throw new Error(`Invalid risk level: ${level} (expected ${RISK_LEVELS.join(', ')})`);
+  }
+  return up;
+}
 
 const now = () => new Date().toISOString();
 
@@ -18,11 +33,12 @@ export function createGoal(
   db: BrainDb,
   input: { title: string; objective: string; autonomyLevel?: string; riskLevel?: string; complexity?: string },
 ): Goal {
+  const riskLevel = input.riskLevel !== undefined ? normaliseRiskLevel(input.riskLevel) : null;
   const id = nextGoalId(db);
   const ts = now();
   db.insert(goals).values({
     id, title: input.title, objective: input.objective,
-    autonomyLevel: input.autonomyLevel ?? 'full', riskLevel: input.riskLevel ?? null,
+    autonomyLevel: input.autonomyLevel ?? 'full', riskLevel,
     complexity: input.complexity ?? null,
     status: 'DRAFT', createdAt: ts, updatedAt: ts,
   }).run();
@@ -52,8 +68,39 @@ export function listRequirements(db: BrainDb, goalId: string): Requirement[] {
   return db.select().from(goalRequirements).where(eq(goalRequirements.goalId, goalId)).all();
 }
 
+export function checkContract(db: BrainDb, goalId: string): ContractCheck {
+  const g = getGoal(db, goalId);
+  const reqs = listRequirements(db, goalId);
+  const gaps: ContractGap[] = [];
+  if (!g.objective.trim()) gaps.push({ field: 'objective', message: 'Objective is empty' });
+  if (!reqs.some(r => r.requirementType === 'success_criterion' && r.priority === 'required')) {
+    gaps.push({ field: 'success_criterion', message: 'No required success criterion' });
+  }
+  if (!reqs.some(r => r.requirementType === 'scope')) gaps.push({ field: 'scope', message: 'No scope defined' });
+  if (!g.riskLevel) gaps.push({ field: 'risk_level', message: 'Risk level not set' });
+  const openGapKeys = new Set(gaps.map(x => `missing:${x.field}`));
+  const openQuestions = db.select().from(goalQuestions).where(and(
+    eq(goalQuestions.goalId, goalId), eq(goalQuestions.status, 'pending'), eq(goalQuestions.materiality, 'material'),
+  )).all().filter(q =>
+    // a Brain gap question stops blocking as soon as its field is filled (Review Focus 1)
+    !(q.source === 'brain' && q.checkKey?.startsWith('missing:') && !openGapKeys.has(q.checkKey)));
+  return { ready: gaps.length === 0 && openQuestions.length === 0, gaps, openQuestions };
+}
+
+export function setGoalFields(
+  db: BrainDb, id: string, input: { riskLevel?: string; autonomyLevel?: string },
+): Goal {
+  const g = getGoal(db, id);
+  if (g.lockedAt) throw new GoalLockedError(`Goal ${id} is locked; contract fields are frozen (§18).`);
+  const set: Partial<typeof goals.$inferInsert> = { updatedAt: now() };
+  if (input.riskLevel !== undefined) set.riskLevel = normaliseRiskLevel(input.riskLevel);
+  if (input.autonomyLevel !== undefined) set.autonomyLevel = input.autonomyLevel;
+  db.update(goals).set(set).where(eq(goals.id, id)).run();
+  return getGoal(db, id);
+}
+
 const VALID_REQUIREMENT_TYPES = [
-  'objective', 'constraint', 'success_criterion', 'exclusion', 'assumption',
+  'objective', 'constraint', 'success_criterion', 'exclusion', 'assumption', 'scope', 'permission',
 ];
 
 export function addRequirement(
@@ -95,19 +142,35 @@ function setStatus(db: BrainDb, id: string, status: string, extra: Partial<typeo
   return getGoal(db, id);
 }
 
-export function lockGoal(db: BrainDb, id: string): Goal {
+export function lockGoal(db: BrainDb, id: string, opts: { force?: boolean; reason?: string } = {}): Goal {
   const g = getGoal(db, id);
   if (g.lockedAt) throw new GoalLockedError(`Goal ${id} is already locked.`);
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot lock.`);
+  if (opts.force && !opts.reason?.trim()) throw new Error('Force-locking requires a reason (recorded as a decision).');
+  const check = checkContract(db, id);
+  const unresolved = [
+    ...check.gaps.map(x => x.message),
+    ...check.openQuestions.map(q => `open question #${q.id}: ${q.question}`),
+  ];
+  if (!check.ready) {
+    if (!opts.force) {
+      throw new ContractIncompleteError(`Cannot lock ${id}; contract incomplete (§9): ${unresolved.join('; ')}`);
+    }
+    addDecision(db, {
+      goalId: id, decision: `Force-locked ${id} with an incomplete contract`,
+      reason: `${opts.reason} | unresolved: ${unresolved.join('; ')}`, riskLevel: 'MEDIUM', reversible: true,
+    });
+  }
+  const answered = db.select().from(goalQuestions)
+    .where(and(eq(goalQuestions.goalId, id), eq(goalQuestions.status, 'answered'))).all();
   const snapshot = JSON.stringify({
-    objective: g.objective,
+    objective: g.objective, riskLevel: g.riskLevel, autonomyLevel: g.autonomyLevel,
     requirements: listRequirements(db, id).map(r => ({
       type: r.requirementType, description: r.description, priority: r.priority,
     })),
+    answeredQuestions: answered.map(q => ({ question: q.question, answer: q.answer })),
   });
-  return setStatus(db, id, 'LOCKED', {
-    lockedAt: now(), contractSnapshot: snapshot, clarificationStatus: 'complete',
-  });
+  return setStatus(db, id, 'LOCKED', { lockedAt: now(), contractSnapshot: snapshot });
 }
 
 export function startGoal(db: BrainDb, id: string): Goal {

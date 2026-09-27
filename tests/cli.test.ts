@@ -24,6 +24,8 @@ describe('brain CLI end-to-end', () => {
     expect(g.status).toBe('DRAFT');
 
     const r = brain('goal', 'requirement', 'add', g.id, 'scanner detects package.json projects');
+    brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
+    brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
     brain('goal', 'start', g.id);
 
@@ -36,7 +38,7 @@ describe('brain CLI end-to-end', () => {
 
     const ctx = brain('context', 'get', '-g', g.id);
     expect(ctx.goal.id).toBe(g.id);
-    expect(ctx.requirements.length).toBe(1);
+    expect(ctx.requirements.length).toBe(2);
     expect(ctx.knowledge.length).toBeGreaterThan(0);
 
     const hits = brain('knowledge', 'search', 'projects');
@@ -54,6 +56,8 @@ describe('brain CLI end-to-end', () => {
   it('fails loudly when completing with unmet criteria', { timeout: 120000 }, () => {
     const g = brain('goal', 'create', 'Another goal');
     brain('goal', 'requirement', 'add', g.id, 'never verified');
+    brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
+    brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
     expect(() => brain('goal', 'complete', g.id)).toThrow();
   });
@@ -76,6 +80,8 @@ describe('brain CLI end-to-end', () => {
 
     // verification drives requirement status; resume recommends completion
     const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion');
+    brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
+    brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
     brain('goal', 'start', g.id);
     brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--passed', '--command', 'true');

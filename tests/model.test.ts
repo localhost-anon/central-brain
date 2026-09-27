@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createTestDb } from './helpers.js';
+import { createTestDb, makeLockable } from './helpers.js';
 import { createGoal, lockGoal } from '../src/services/goals.js';
 import { recommendModel } from '../src/services/model.js';
 
@@ -33,6 +33,7 @@ describe('model routing', () => {
   it('uses the current active goal when no goalId is given', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o', complexity: 'critical' });
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     expect(recommendModel(db).model).toBe('fable');
   });

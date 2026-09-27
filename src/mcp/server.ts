@@ -47,8 +47,12 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_goal_list', 'List goals, optionally by status', { status: z.string().optional() },
     (a) => goals.listGoals(db, a));
   tool('brain_goal_current', 'Get the currently active goal', {}, () => goals.currentGoal(db) ?? null);
-  tool('brain_goal_lock', 'Lock the goal contract (freezes requirements)', { id: z.string() },
-    (a) => goals.lockGoal(db, a.id));
+  tool('brain_goal_lock', 'Lock the goal contract; refuses §9 gaps/open material questions unless force+reason', {
+    id: z.string(), force: z.boolean().optional(), reason: z.string().optional(),
+  }, (a) => goals.lockGoal(db, a.id, { force: a.force, reason: a.reason }));
+  tool('brain_goal_set', 'Set contract fields (risk, autonomy) on an unlocked goal', {
+    id: z.string(), risk: z.enum(['LOW', 'MEDIUM', 'HIGH', 'IRREVERSIBLE']).optional(), autonomy: z.string().optional(),
+  }, (a) => goals.setGoalFields(db, a.id, { riskLevel: a.risk, autonomyLevel: a.autonomy }));
   tool('brain_goal_start', 'Start executing a locked goal', { id: z.string() },
     (a) => goals.startGoal(db, a.id));
   tool('brain_goal_block', 'Mark a goal blocked with a reason', { id: z.string(), reason: z.string() },
@@ -58,7 +62,7 @@ export function buildServer(db: BrainDb): McpServer {
   }, (a) => goals.completeGoal(db, a.id, { force: a.force }));
   tool('brain_requirement_add', 'Add a requirement to an unlocked goal', {
     goalId: z.string(), description: z.string(),
-    type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption'])
+    type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption', 'scope', 'permission'])
       .default('success_criterion'),
     priority: z.enum(['required', 'optional']).optional(),
   }, (a) => goals.addRequirement(db, a.goalId, a));

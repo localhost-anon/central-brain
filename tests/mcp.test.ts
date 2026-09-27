@@ -35,10 +35,12 @@ describe('brain MCP server', () => {
       name: 'brain_requirement_add',
       arguments: { goalId: g.id, description: 'login works', type: 'success_criterion' },
     });
+    await client.callTool({ name: 'brain_requirement_add', arguments: { goalId: g.id, description: 'auth only', type: 'scope' } });
+    await client.callTool({ name: 'brain_goal_set', arguments: { id: g.id, risk: 'LOW' } });
     await client.callTool({ name: 'brain_goal_lock', arguments: { id: g.id } });
     const ctx = text(await client.callTool({ name: 'brain_context_get', arguments: {} }));
     expect(ctx.goal.id).toBe(g.id);
-    expect(ctx.requirements).toHaveLength(1);
+    expect(ctx.requirements).toHaveLength(2);
   });
 
   it('surfaces service errors as tool errors', async () => {

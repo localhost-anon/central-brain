@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb } from './helpers.js';
+import { createTestDb, makeLockable } from './helpers.js';
 import { createGoal, addRequirement, lockGoal } from '../src/services/goals.js';
 import { createWorkUnit } from '../src/services/work.js';
 import { addKnowledge } from '../src/services/knowledge.js';
@@ -11,6 +11,7 @@ describe('context engine', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Add SSO', objective: 'MS auth' });
     addRequirement(db, g.id, { type: 'success_criterion', description: 'login works' });
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     createWorkUnit(db, { goalId: g.id, title: 'Inspect auth' });
     addDecision(db, { goalId: g.id, decision: 'Use MSAL' });
@@ -18,7 +19,7 @@ describe('context engine', () => {
     addKnowledge(db, { scopeType: 'GLOBAL', statement: 'Prefer reversible changes' });
     const ctx = getContext(db, { goalId: g.id });
     expect(ctx.goal?.id).toBe(g.id);
-    expect(ctx.requirements).toHaveLength(1);
+    expect(ctx.requirements).toHaveLength(2);
     expect(ctx.workUnits).toHaveLength(1);
     expect(ctx.decisions).toHaveLength(1);
     // goal-scoped knowledge ranks before global
@@ -31,6 +32,7 @@ describe('context engine', () => {
   it('falls back to the current active goal and respects budget', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Active goal', objective: 'o' });
+    makeLockable(db, g.id);
     lockGoal(db, g.id);
     for (let i = 0; i < 50; i++) {
       addKnowledge(db, { scopeType: 'GLOBAL', statement: `fact number ${i}` });
