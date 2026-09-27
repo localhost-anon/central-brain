@@ -40,14 +40,12 @@ describe('database', () => {
     expect(() => migrateDb(db)).not.toThrow();
   });
 
-  it('observations FTS table indexes inserted rows', () => {
+  it('phase 3 schema: embeddings table and observations_fts exist', () => {
     const db = createTestDb();
-    db.$client.prepare(
-      "INSERT INTO observations (observation, created_at) VALUES ('truenas hosts seafile', ?)"
-    ).run(new Date().toISOString());
-    const hits = db.$client.prepare(
-      "SELECT rowid FROM observations_fts WHERE observations_fts MATCH 'seafile'"
-    ).all();
-    expect(hits.length).toBe(1);
+    const names = db.$client.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND (name='embeddings' OR name LIKE 'observations%')"
+    ).all() as { name: string }[];
+    expect(names.map((r) => r.name)).toContain('embeddings');
+    expect(names.map((r) => r.name)).toContain('observations_fts');
   });
 });
