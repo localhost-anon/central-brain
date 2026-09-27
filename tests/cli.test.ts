@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -81,5 +82,24 @@ describe('brain CLI end-to-end', () => {
     const state = brain('goal', 'resume', g.id);
     expect(state.requirements[0].status).toBe('PASSED');
     expect(state.nextRecommendedAction).toBe('All criteria passed — complete the goal');
+  });
+
+  it('phase 3: import + reindex + hybrid search e2e', { timeout: 300000 }, () => {
+    const src = path.join(tmp, 'claude-mem.db');
+    const s = new Database(src);
+    s.exec(`CREATE TABLE observations (
+      id INTEGER PRIMARY KEY, project TEXT, type TEXT, title TEXT, text TEXT,
+      created_at TEXT, created_at_epoch INTEGER)`);
+    s.prepare('INSERT INTO observations (id, project, type, title, text, created_at_epoch) VALUES (?,?,?,?,?,?)')
+      .run(1, 'central-brain', 'decision', 'Chose SQLite', 'zero infrastructure wins', 1756500000000);
+    s.close();
+    expect(brain('import', 'claude-mem', src).imported).toBe(1);
+    expect(brain('import', 'claude-mem', src).imported).toBe(0); // idempotent
+
+    brain('knowledge', 'add', 'TrueNAS box runs Seafile document sync service', '-s', 'GLOBAL');
+    const re = brain('embed', 'reindex');
+    expect(re.embedded).toBeGreaterThan(0);
+    const hits = brain('knowledge', 'search', 'network storage appliance for syncing files');
+    expect(hits.some((h: any) => h.text.includes('Seafile'))).toBe(true);
   });
 });

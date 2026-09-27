@@ -9,11 +9,15 @@ import * as knowledge from '../services/knowledge.js';
 import * as decisions from '../services/decisions.js';
 import * as context from '../services/context.js';
 import { recommendModel } from '../services/model.js';
-import { search, type SearchType } from '../services/search.js';
+import type { SearchType } from '../services/search.js';
 import { scanProjects } from '../services/scanner.js';
 import * as fail from '../services/failures.js';
 import { goalVerificationState, recordVerification } from '../services/verification.js';
 import { resumeGoal } from '../services/resume.js';
+import { createFastEmbedder } from '../services/embedder.js';
+import { reindexEmbeddings } from '../services/embedding-store.js';
+import { hybridSearch } from '../services/hybrid-search.js';
+import { importClaudeMem } from '../services/import-claude-mem.js';
 
 export function buildServer(db: BrainDb): McpServer {
   const server = new McpServer({ name: 'central-brain', version: '0.1.0' });
@@ -21,12 +25,16 @@ export function buildServer(db: BrainDb): McpServer {
   const tool = (name: string, description: string, shape: ZodRawShape, fn: (args: any) => unknown) => {
     server.registerTool(name, { description, inputSchema: shape }, async (args: any) => {
       try {
-        return { content: [{ type: 'text' as const, text: JSON.stringify(fn(args) ?? null, null, 2) }] };
+        return { content: [{ type: 'text' as const, text: JSON.stringify((await fn(args)) ?? null, null, 2) }] };
       } catch (e) {
         return { isError: true, content: [{ type: 'text' as const, text: (e as Error).message }] };
       }
     });
   };
+
+  // Lazy: the ONNX model is only loaded when a search/reindex tool is first called.
+  let emb: ReturnType<typeof createFastEmbedder> | undefined;
+  const embedder = () => (emb ??= createFastEmbedder());
 
   // goals
   tool('brain_goal_create', 'Create a new goal (DRAFT)', {
@@ -90,9 +98,9 @@ export function buildServer(db: BrainDb): McpServer {
     confidence: z.number().optional(), sourceType: z.string().optional(),
     sourceReference: z.string().optional(),
   }, (a) => knowledge.addKnowledge(db, a));
-  tool('brain_knowledge_search', 'FTS search over active knowledge', {
+  tool('brain_knowledge_search', 'Hybrid (FTS + semantic) search over active knowledge', {
     query: z.string(), limit: z.number().optional(),
-  }, (a) => search(db, a.query, { types: ['knowledge' as SearchType], limit: a.limit }));
+  }, (a) => hybridSearch(db, embedder(), a.query, { types: ['knowledge' as SearchType], limit: a.limit }));
   tool('brain_knowledge_verify', 'Mark a fact as re-verified now', { id: z.number() },
     (a) => knowledge.verifyKnowledge(db, a.id));
   tool('brain_knowledge_invalidate', 'Mark a fact invalid', { id: z.number() },
@@ -101,9 +109,9 @@ export function buildServer(db: BrainDb): McpServer {
     learning: z.string(), scopeType: z.string().optional(),
     scopeId: z.string().optional(), trigger: z.string().optional(),
   }, (a) => knowledge.addLearning(db, a));
-  tool('brain_learning_search', 'FTS search over learnings', {
+  tool('brain_learning_search', 'Hybrid (FTS + semantic) search over learnings', {
     query: z.string(), limit: z.number().optional(),
-  }, (a) => search(db, a.query, { types: ['learning' as SearchType], limit: a.limit }));
+  }, (a) => hybridSearch(db, embedder(), a.query, { types: ['learning' as SearchType], limit: a.limit }));
   tool('brain_learning_useful', 'Record that a learning was useful', { id: z.number() },
     (a) => knowledge.markLearningUseful(db, a.id));
 
@@ -123,9 +131,9 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_context_get', 'Budgeted context for a goal (or the current goal)', {
     goalId: z.string().optional(), budget: z.number().optional(),
   }, (a) => context.getContext(db, a));
-  tool('brain_context_search', 'FTS search across knowledge, learnings, decisions, failures, goals', {
+  tool('brain_context_search', 'Hybrid (FTS + semantic) search across knowledge, learnings, decisions, failures, goals, observations', {
     query: z.string(), limit: z.number().optional(),
-  }, (a) => context.searchContext(db, a.query, a));
+  }, (a) => hybridSearch(db, embedder(), a.query, { limit: a.limit }));
 
   // model routing
   tool('brain_model_recommend', 'Recommend a Claude model for a goal or explicit complexity (§12.1)', {
@@ -155,9 +163,9 @@ export function buildServer(db: BrainDb): McpServer {
     errorMessage: z.string(), goalId: z.string().optional(), workUnitId: z.string().optional(),
     failureType: z.string().optional(), context: z.string().optional(),
   }, (a) => fail.addFailure(db, a));
-  tool('brain_failure_search', 'Have I seen this error before? FTS over failures (§66)', {
+  tool('brain_failure_search', 'Have I seen this error before? Hybrid (FTS + semantic) search over failures (§66)', {
     query: z.string(), limit: z.number().optional(),
-  }, (a) => fail.searchFailures(db, a.query, a));
+  }, (a) => hybridSearch(db, embedder(), a.query, { types: ['failure' as SearchType], limit: a.limit }));
   tool('brain_failure_resolve', 'Mark a failure resolved', { id: z.number() },
     (a) => fail.resolveFailure(db, a.id));
   tool('brain_failure_solution_add', 'Attach a solution to a failure; successful:true also resolves it', {
@@ -175,6 +183,13 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_goal_resume', 'Full resume state + next recommended action (§72)', {
     id: z.string(),
   }, (a) => resumeGoal(db, a.id));
+
+  // embeddings & import
+  tool('brain_embed_reindex', 'Embed all missing/stale rows locally (ONNX)', {},
+    () => reindexEmbeddings(db, embedder()));
+  tool('brain_import_claude_mem', 'One-time idempotent claude-mem observation import', {
+    path: z.string().optional(),
+  }, (a) => importClaudeMem(db, a.path));
 
   return server;
 }

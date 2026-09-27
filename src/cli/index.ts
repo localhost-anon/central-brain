@@ -8,11 +8,14 @@ import * as knowledge from '../services/knowledge.js';
 import * as decisions from '../services/decisions.js';
 import * as context from '../services/context.js';
 import { recommendModel, type Complexity } from '../services/model.js';
-import { search } from '../services/search.js';
 import { scanProjects } from '../services/scanner.js';
 import * as fail from '../services/failures.js';
 import { recordVerification, goalVerificationState } from '../services/verification.js';
 import { resumeGoal } from '../services/resume.js';
+import { createFastEmbedder } from '../services/embedder.js';
+import { reindexEmbeddings } from '../services/embedding-store.js';
+import { hybridSearch } from '../services/hybrid-search.js';
+import { importClaudeMem } from '../services/import-claude-mem.js';
 
 function db(): BrainDb {
   const handle = openDb();
@@ -24,6 +27,18 @@ const out = (v: unknown) => console.log(JSON.stringify(v, null, 2));
 
 function run(fn: () => void): void {
   try { fn(); } catch (e) {
+    console.error((e as Error).message);
+    process.exitCode = 1;
+  }
+}
+
+// Lazy: the embedder (ONNX model) is only initialised by commands that need it,
+// so hot paths like `context get` (SessionStart hook) pay no model-load cost.
+let embedderSingleton: ReturnType<typeof createFastEmbedder> | undefined;
+const embedder = () => (embedderSingleton ??= createFastEmbedder());
+
+async function runAsync(fn: () => Promise<void>): Promise<void> {
+  try { await fn(); } catch (e) {
     console.error((e as Error).message);
     process.exitCode = 1;
   }
@@ -121,7 +136,7 @@ know.command('add <statement>')
     sourceType: o.source, sourceReference: o.sourceRef,
   }))));
 know.command('search <query>').option('-n, --limit <n>')
-  .action((query, o) => run(() => out(search(db(), query, {
+  .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {
     types: ['knowledge'], limit: o.limit ? Number(o.limit) : undefined,
   }))));
 know.command('verify <id>').action((id) => run(() => out(knowledge.verifyKnowledge(db(), Number(id)))));
@@ -134,7 +149,8 @@ learn.command('add <learning>').option('-s, --scope <scopeType>').option('--scop
   .action((text, o) => run(() => out(knowledge.addLearning(db(), {
     learning: text, scopeType: o.scope, scopeId: o.scopeId, trigger: o.trigger,
   }))));
-learn.command('search <query>').action((query) => run(() => out(search(db(), query, { types: ['learning'] }))));
+learn.command('search <query>')
+  .action((query) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, { types: ['learning'] }))));
 learn.command('useful <id>').action((id) => run(() => out(knowledge.markLearningUseful(db(), Number(id)))));
 
 // ---- decision / observation / approval ----
@@ -168,7 +184,7 @@ ctx.command('get').option('-g, --goal <goalId>').option('--current')
     goalId: o.goal, budget: Number(o.budget),
   }))));
 ctx.command('search <query>').option('-n, --limit <n>')
-  .action((query, o) => run(() => out(context.searchContext(db(), query, {
+  .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {
     limit: o.limit ? Number(o.limit) : undefined,
   }))));
 
@@ -180,8 +196,8 @@ failCmd.command('add <errorMessage>').option('-g, --goal <goalId>')
     errorMessage, goalId: o.goal, failureType: o.type, context: o.context, workUnitId: o.workUnit,
   }))));
 failCmd.command('search <query>').option('-n, --limit <n>')
-  .action((query, o) => run(() => out(fail.searchFailures(db(), query, {
-    limit: o.limit ? Number(o.limit) : undefined,
+  .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {
+    types: ['failure'], limit: o.limit ? Number(o.limit) : undefined,
   }))));
 failCmd.command('show <id>').action((id) => run(() => out(fail.getFailure(db(), Number(id)))));
 failCmd.command('resolve <id>').action((id) => run(() => out(fail.resolveFailure(db(), Number(id)))));
@@ -207,6 +223,15 @@ verifyCmd.command('add').requiredOption('-g, --goal <goalId>')
   }));
 verifyCmd.command('goal <goalId>').action((goalId) => run(() => out(goalVerificationState(db(), goalId))));
 
+// ---- embeddings & import ----
+const embedCmd = program.command('embed');
+embedCmd.command('reindex').description('Embed all missing/stale rows locally (ONNX)')
+  .action(() => runAsync(async () => out(await reindexEmbeddings(db(), embedder()))));
+
+const importCmd = program.command('import');
+importCmd.command('claude-mem [path]').description('One-time idempotent claude-mem import (§79)')
+  .action((p) => runAsync(async () => { out(importClaudeMem(db(), p)); }));
+
 // ---- model routing ----
 const modelCmd = program.command('model');
 modelCmd.command('recommend').description('Recommend a Claude model (§12.1)')
@@ -215,4 +240,4 @@ modelCmd.command('recommend').description('Recommend a Claude model (§12.1)')
     goalId: o.goal, complexity: o.complexity as Complexity | undefined,
   }))));
 
-program.parse();
+await program.parseAsync();
