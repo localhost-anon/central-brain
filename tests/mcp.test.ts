@@ -65,6 +65,6 @@ describe('brain MCP server', () => {
     expect(hits).toHaveLength(1);
     const state = text(await client.callTool({ name: 'brain_goal_resume', arguments: { id: g.id } }));
     expect(state.unresolvedFailures).toHaveLength(1);
-    expect(state.nextRecommendedAction).toMatch(/lock the goal contract/i);
+    expect(state.nextRecommendedAction).toMatch(/goal intake/i);
   });
 });

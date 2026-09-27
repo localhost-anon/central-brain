@@ -1,5 +1,7 @@
 import { Command } from 'commander';
-import { openDb, migrateDb, resolveDbPath, type BrainDb } from '../db/connection.js';
+import {
+  openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, SCHEMA_NOTICE, type BrainDb,
+} from '../db/connection.js';
 import { backupDb } from '../db/backup.js';
 import * as goals from '../services/goals.js';
 import * as work from '../services/work.js';
@@ -17,9 +19,10 @@ import { reindexEmbeddings } from '../services/embedding-store.js';
 import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
 
-function db(): BrainDb {
+function db(opts: { migrate?: boolean } = {}): BrainDb {
   const handle = openDb();
-  migrateDb(handle); // idempotent; keeps CLI usable right after upgrades
+  // Explicit commands auto-migrate (with snapshot). Passive callers only initialise a brand-new DB.
+  if (opts.migrate !== false || appliedMigrations(handle) === 0) migrateDb(handle);
   return handle;
 }
 
@@ -51,6 +54,14 @@ program.command('init').description('Create the database and apply migrations')
 
 program.command('backup').description('Snapshot the database (VACUUM INTO)')
   .action(() => run(() => out({ backup: backupDb(db()) })));
+
+program.command('migrate').description('Snapshot, then apply pending schema migrations')
+  .action(() => run(() => {
+    const d = openDb();
+    const before = pendingMigrations(d);
+    migrateDb(d);
+    out({ applied: before - pendingMigrations(d), pending: pendingMigrations(d) });
+  }));
 
 // ---- goal ----
 const goal = program.command('goal');
@@ -185,9 +196,14 @@ appr.command('resolve <id> <status>')
 const ctx = program.command('context');
 ctx.command('get').option('-g, --goal <goalId>').option('--current')
   .option('-b, --budget <n>', 'max items', '30')
-  .action((o) => run(() => out(context.getContext(db(), {
-    goalId: o.goal, budget: Number(o.budget),
-  }))));
+  .action((o) => run(() => {
+    const d = db({ migrate: false });
+    const pending = pendingMigrations(d) > 0;
+    out({
+      ...context.getContext(d, { goalId: o.goal, budget: Number(o.budget) }),
+      schemaPending: pending, ...(pending ? { notice: SCHEMA_NOTICE } : {}),
+    });
+  }));
 ctx.command('search <query>').option('-n, --limit <n>')
   .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {
     limit: o.limit ? Number(o.limit) : undefined,

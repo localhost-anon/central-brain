@@ -1,7 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z, type ZodRawShape } from 'zod';
-import { openDb, migrateDb, type BrainDb } from '../db/connection.js';
+import {
+  openDb, migrateDb, appliedMigrations, pendingMigrations, SCHEMA_NOTICE, type BrainDb,
+} from '../db/connection.js';
 import * as goals from '../services/goals.js';
 import * as work from '../services/work.js';
 import * as projects from '../services/projects.js';
@@ -27,7 +29,9 @@ export function buildServer(db: BrainDb): McpServer {
       try {
         return { content: [{ type: 'text' as const, text: JSON.stringify((await fn(args)) ?? null, null, 2) }] };
       } catch (e) {
-        return { isError: true, content: [{ type: 'text' as const, text: (e as Error).message }] };
+        const msg = (e as Error).message;
+        const text = pendingMigrations(db) > 0 ? `${msg}\n${SCHEMA_NOTICE}` : msg;
+        return { isError: true, content: [{ type: 'text' as const, text }] };
       }
     });
   };
@@ -200,7 +204,8 @@ export function buildServer(db: BrainDb): McpServer {
 
 async function main(): Promise<void> {
   const db = openDb();
-  migrateDb(db);
+  if (appliedMigrations(db) === 0) migrateDb(db);
+  else if (pendingMigrations(db) > 0) console.error(SCHEMA_NOTICE);
   await buildServer(db).connect(new StdioServerTransport());
 }
 

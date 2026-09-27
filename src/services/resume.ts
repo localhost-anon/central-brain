@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { failures } from '../db/schema.js';
-import { getGoal, listRequirements, type Goal, type Requirement } from './goals.js';
+import { checkContract, getGoal, listRequirements, type Goal, type Requirement } from './goals.js';
 import { listDecisions, type Decision } from './decisions.js';
 import { listWorkUnits, readyWorkUnits, type WorkUnit } from './work.js';
 import { goalVerificationState } from './verification.js';
@@ -19,9 +19,17 @@ export interface ResumeState {
   nextRecommendedAction: string;
 }
 
-function recommend(goal: Goal, ready: WorkUnit[], pending: WorkUnit[], allPassed: boolean): string {
+function recommend(
+  goal: Goal, ready: WorkUnit[], pending: WorkUnit[], allPassed: boolean,
+  intake: { openMaterial: number; ready: boolean },
+): string {
   switch (goal.status) {
-    case 'DRAFT': return 'Clarify requirements and lock the goal contract';
+    case 'DRAFT':
+      if (intake.openMaterial > 0) {
+        return `Answer ${intake.openMaterial} open material question(s) in one batch (brain goal question list ${goal.id} --open)`;
+      }
+      if (intake.ready) return `Contract ready — lock the goal contract (brain goal lock ${goal.id})`;
+      return `Run goal intake to find contract gaps (brain goal intake ${goal.id})`;
     case 'LOCKED': return `Start the goal (brain goal start ${goal.id})`;
     case 'BLOCKED': return 'Resolve the blocker (see latest observation), then restart';
     case 'COMPLETED':
@@ -45,6 +53,8 @@ export function resumeGoal(db: BrainDb, id: string): ResumeState {
   const unresolvedFailures = db.select().from(failures)
     .where(and(eq(failures.goalId, id), eq(failures.resolved, 0))).all();
   const { allRequiredPassed } = goalVerificationState(db, id);
+  const contractCheck = checkContract(db, id);
+  const intake = { openMaterial: contractCheck.openQuestions.length, ready: contractCheck.ready };
   return {
     goal,
     contract: goal.contractSnapshot ? JSON.parse(goal.contractSnapshot) : null,
@@ -54,6 +64,6 @@ export function resumeGoal(db: BrainDb, id: string): ResumeState {
     decisions: listDecisions(db, { goalId: id }),
     unresolvedFailures,
     requirements: listRequirements(db, id),
-    nextRecommendedAction: recommend(goal, readyWork, pendingWork, allRequiredPassed),
+    nextRecommendedAction: recommend(goal, readyWork, pendingWork, allRequiredPassed, intake),
   };
 }

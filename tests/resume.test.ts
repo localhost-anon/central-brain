@@ -5,6 +5,7 @@ import { createWorkUnit, updateWorkUnit } from '../src/services/work.js';
 import { addFailure } from '../src/services/failures.js';
 import { recordVerification } from '../src/services/verification.js';
 import { resumeGoal } from '../src/services/resume.js';
+import { addQuestion } from '../src/services/questions.js';
 
 describe('goal resume (§72)', () => {
   it('assembles full state and points at the next ready work unit', () => {
@@ -33,8 +34,12 @@ describe('goal resume (§72)', () => {
   it('gives lifecycle-appropriate recommendations', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Draft goal', objective: 'o' });
-    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/lock the goal contract/i);
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/goal intake/i);
+    const q = addQuestion(db, g.id, { question: 'Keep passwords?' });
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/answer 1 open material question/i);
     makeLockable(db, g.id);
+    db.$client.prepare("UPDATE goal_questions SET status = 'dismissed' WHERE id = ?").run(q.id);
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/lock the goal contract/i);
     lockGoal(db, g.id);
     expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/start the goal/i);
     expect(resumeGoal(db, g.id).contract).not.toBeNull();

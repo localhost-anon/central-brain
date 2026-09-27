@@ -36,6 +36,8 @@ export function pendingMigrations(db: BrainDb): number {
   return Math.max(0, journal.entries.length - appliedMigrations(db));
 }
 
+export const SCHEMA_NOTICE = 'Brain schema update pending — run `brain migrate`';
+
 export function snapshotDir(db: BrainDb): string {
   return path.join(path.dirname(db.$client.name), 'backups');
 }

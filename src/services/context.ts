@@ -1,4 +1,6 @@
+import { and, eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
+import { goalQuestions } from '../db/schema.js';
 import type { Goal } from './goals.js';
 import type { Requirement } from './goals.js';
 import type { WorkUnit } from './work.js';
@@ -23,6 +25,7 @@ export interface BrainContext {
   learnings: Learning[];
   relatedGoals: { id: string; title: string; status: string }[];
   recommendedModel: ModelRouting;
+  openMaterialQuestions: number;
 }
 
 function rankKnowledge(rows: Knowledge[], goalId?: string): Knowledge[] {
@@ -54,6 +57,17 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
     .slice(0, 10)
     .map(g => ({ id: g.id, title: g.title, status: g.status }));
 
+  let openMaterialQuestions = 0;
+  if (goal) {
+    try {
+      openMaterialQuestions = db.select().from(goalQuestions).where(and(
+        eq(goalQuestions.goalId, goal.id), eq(goalQuestions.status, 'pending'), eq(goalQuestions.materiality, 'material'),
+      )).all().length;
+    } catch {
+      openMaterialQuestions = 0; // schema pending (passive path) — columns may not exist yet
+    }
+  }
+
   // Allocate budget across four capped categories, then backfill.
   const cats: { rows: unknown[] }[] = [
     { rows: decisionsAll },
@@ -79,6 +93,7 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
     learnings: learningsAll.slice(0, caps[2]),
     relatedGoals: relatedAll.slice(0, caps[3]),
     recommendedModel: recommendModel(db, { goalId: goal?.id }),
+    openMaterialQuestions,
   };
 }
 
