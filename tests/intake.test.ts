@@ -85,6 +85,37 @@ describe('intake report', () => {
     expect(r.reviewItems.filter(i => i.kind === 'overlapping_goal')).toHaveLength(0);
   });
 
+  it('overlapping_goal score is the cosine similarity (0..1], sorted desc', async () => {
+    const db = createTestDb();
+    const e = fakeEmbedder();
+    const other = createGoal(db, { title: 'Microsoft sign in', objective: 'users sign in with microsoft accounts' });
+    const g = createGoal(db, { title: 'Microsoft sign in v2', objective: 'users sign in with microsoft' });
+    await reindexEmbeddings(db, e);
+    const r = await buildIntakeReport(db, e, g.id);
+    const overlaps = r.reviewItems.filter(i => i.kind === 'overlapping_goal');
+    const item = overlaps.find(i => i.ref === `goal:${other.id}`)!;
+    expect(item).toBeDefined();
+    expect(item.score).toBeGreaterThan(0);
+    expect(item.score).toBeLessThanOrEqual(1 + 1e-6);
+    expect(item.text).toBe('Microsoft sign in: users sign in with microsoft accounts');
+    expect(overlaps.some(i => i.ref === `goal:${g.id}`)).toBe(false);
+    for (let i = 1; i < overlaps.length; i++) expect(overlaps[i - 1]!.score).toBeGreaterThanOrEqual(overlaps[i]!.score);
+  });
+
+  it('overlapping goals respect the embedder similarity floor; FTS-only matches are not flagged', async () => {
+    const db = createTestDb();
+    const f = fakeEmbedder();
+    const e: Embedder = { model: f.model, minSimilarity: 0.95, embed: (t) => f.embed(t) };
+    // FTS ANDs every query term, so the new goal's query is the single shared word
+    const other = createGoal(db, { title: 'Kubernetes cluster', objective: 'upgrade worker nodes to the zanzibar release' });
+    const g = createGoal(db, { title: 'Zanzibar', objective: 'zanzibar' });
+    await reindexEmbeddings(db, e);
+    const r = await buildIntakeReport(db, e, g.id);
+    expect(r.semanticUnavailable).toBe(false);
+    expect(r.context.goal.some(h => h.id === other.id)).toBe(true);
+    expect(r.reviewItems.filter(i => i.kind === 'overlapping_goal')).toHaveLength(0);
+  });
+
   it('is read-only on a locked goal', async () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });

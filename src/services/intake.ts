@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { knowledge } from '../db/schema.js';
-import { cosine, type Embedder } from './embedder.js';
+import { cosine, fromBlob, type Embedder } from './embedder.js';
+import { loadEmbeddings } from './embedding-store.js';
 import {
   checkContract, getGoal, listRequirements, type ContractGap, type Goal, type GoalQuestion,
 } from './goals.js';
@@ -74,27 +75,7 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
     context[t] = hits.filter(h => !(h.type === 'goal' && h.id === goalId)).slice(0, PER_TYPE);
   }
 
-  // 3. review items — surfaced for the session to judge, never auto-asked
-  const reviewItems: IntakeReport['reviewItems'] = [];
-  if (!semanticUnavailable) {
-    for (const h of context.goal) {
-      const other = getGoal(db, h.id);
-      if (!TERMINAL.includes(other.status)) {
-        reviewItems.push({ kind: 'overlapping_goal', ref: `goal:${h.id}`, text: h.text, score: -h.score });
-      }
-    }
-  }
-  for (const h of context.decision) {
-    reviewItems.push({ kind: 'related_decision', ref: `decision:${h.id}`, text: h.text, score: -h.score });
-  }
-  for (const h of context.knowledge) {
-    const k = db.select().from(knowledge).where(eq(knowledge.id, Number(h.id))).get();
-    if (k && (k.category === 'preference' || k.statement.startsWith('User preference'))) {
-      reviewItems.push({ kind: 'user_preference', ref: `knowledge:${h.id}`, text: h.text, score: -h.score });
-    }
-  }
-
-  // 4. duplicate requirements
+  // 3. duplicate requirements (embedded before review items so a late embedder failure suppresses overlaps)
   const reqs = listRequirements(db, goalId);
   const duplicates: IntakeReport['duplicates'] = [];
   let vectors: Float32Array[] | null = null;
@@ -108,6 +89,40 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
       } else if (vectors && cosine(vectors[i]!, vectors[j]!) >= DUPLICATE_COSINE) {
         duplicates.push({ a: reqs[i]!.id, b: reqs[j]!.id, reason: 'semantic' });
       }
+    }
+  }
+
+  // 4. overlapping goals — semantic similarity against stored goal vectors, above the embedder's floor (§4.2.3)
+  let overlaps: IntakeReport['reviewItems'] = [];
+  if (!semanticUnavailable) {
+    let queryVec: Float32Array | undefined;
+    try { [queryVec] = await embedder.embed([query]); } catch { semanticUnavailable = true; }
+    if (queryVec && !semanticUnavailable) {
+      const floor = embedder.minSimilarity ?? 0;
+      for (const row of loadEmbeddings(db, embedder.model)) {
+        if (row.sourceType !== 'goal' || String(row.sourceId) === goalId) continue;
+        const similarity = cosine(queryVec, fromBlob(row.vector as Buffer));
+        if (!(similarity > 0) || similarity < floor) continue;
+        const other = getGoal(db, String(row.sourceId));
+        if (TERMINAL.includes(other.status)) continue;
+        overlaps.push({
+          kind: 'overlapping_goal', ref: `goal:${other.id}`,
+          text: `${other.title}: ${other.objective}`, score: similarity,
+        });
+      }
+      overlaps = overlaps.sort((x, y) => y.score - x.score).slice(0, PER_TYPE);
+    }
+  }
+
+  // 5. review items — surfaced for the session to judge, never auto-asked
+  const reviewItems: IntakeReport['reviewItems'] = semanticUnavailable ? [] : overlaps;
+  for (const h of context.decision) {
+    reviewItems.push({ kind: 'related_decision', ref: `decision:${h.id}`, text: h.text, score: -h.score });
+  }
+  for (const h of context.knowledge) {
+    const k = db.select().from(knowledge).where(eq(knowledge.id, Number(h.id))).get();
+    if (k && (k.category === 'preference' || k.statement.startsWith('User preference'))) {
+      reviewItems.push({ kind: 'user_preference', ref: `knowledge:${h.id}`, text: h.text, score: -h.score });
     }
   }
 
