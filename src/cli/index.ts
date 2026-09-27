@@ -18,6 +18,8 @@ import { createFastEmbedder } from '../services/embedder.js';
 import { reindexEmbeddings } from '../services/embedding-store.js';
 import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
+import { buildIntakeReport } from '../services/intake.js';
+import * as questions from '../services/questions.js';
 
 function db(opts: { migrate?: boolean } = {}): BrainDb {
   const handle = openDb();
@@ -85,6 +87,21 @@ goal.command('lock <id>').option('--force', 'lock despite contract gaps (require
 goal.command('set <id>').description('Set contract fields on an unlocked goal')
   .option('--risk <level>', 'LOW|MEDIUM|HIGH|IRREVERSIBLE').option('--autonomy <level>')
   .action((id, o) => run(() => out(goals.setGoalFields(db(), id, { riskLevel: o.risk, autonomyLevel: o.autonomy }))));
+goal.command('intake <id>').description('Intake report: context, gaps, review items, duplicates (§8)')
+  .action((id) => runAsync(async () => out(await buildIntakeReport(db(), embedder(), id))));
+
+const question = goal.command('question');
+question.command('add <goalId> <text>').option('--detail', 'record only; never blocks lock')
+  .action((goalId, text, o) => run(() => out(questions.addQuestion(db(), goalId, {
+    question: text, materiality: o.detail ? 'detail' : 'material',
+  }))));
+question.command('answer <id> <answer>')
+  .option('--as <type>', 'constraint|exclusion|assumption|scope|permission|success_criterion')
+  .action((id, answer, o) => run(() => out(questions.answerQuestion(db(), Number(id), answer, { as: o.as }))));
+question.command('dismiss <id> <reason>')
+  .action((id, reason) => run(() => out(questions.dismissQuestion(db(), Number(id), reason))));
+question.command('list <goalId>').option('--open', 'pending only')
+  .action((goalId, o) => run(() => out(questions.listQuestions(db(), goalId, { open: o.open }))));
 goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id))));
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
 goal.command('complete <id>').option('--force')

@@ -19,9 +19,15 @@ describe('brain MCP server', () => {
   it('exposes the brain_* tool surface', async () => {
     const client = await connect();
     const tools = (await client.listTools()).tools.map(t => t.name);
-    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve', 'brain_project_scan', 'brain_failure_search', 'brain_goal_resume', 'brain_embed_reindex', 'brain_import_claude_mem']) {
+    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve', 'brain_project_scan', 'brain_failure_search', 'brain_goal_resume', 'brain_embed_reindex', 'brain_import_claude_mem', 'brain_goal_intake', 'brain_goal_set', 'brain_question_add', 'brain_question_answer', 'brain_question_dismiss', 'brain_question_list']) {
       expect(tools).toContain(t);
     }
+  });
+
+  it('registers 48 tools', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(48);
   });
 
   it('creates, locks, and retrieves context for a goal via tools', async () => {

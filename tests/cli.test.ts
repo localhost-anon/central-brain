@@ -108,4 +108,25 @@ describe('brain CLI end-to-end', () => {
     const hits = brain('knowledge', 'search', 'network storage appliance for syncing files');
     expect(hits.some((h: any) => h.text.includes('Seafile'))).toBe(true);
   });
+  it('phase 4: intake → answer batch → lock e2e', { timeout: 300000 }, () => {
+    const g = brain('goal', 'create', 'Add SSO', '-o', 'Users sign in with Microsoft');
+    const r1 = brain('goal', 'intake', g.id);
+    expect(r1.ready).toBe(false);
+    expect(r1.openQuestions).toHaveLength(3);
+    expect(() => brain('goal', 'lock', g.id)).toThrow();
+    const qs = brain('goal', 'question', 'list', g.id, '--open');
+    const byKey = (k: string) => qs.find((q: any) => q.checkKey === k).id;
+    brain('goal', 'question', 'answer', String(byKey('missing:scope')), 'auth service and login UI', '--as', 'scope');
+    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end', '--as', 'success_criterion');
+    brain('goal', 'question', 'answer', String(byKey('missing:risk_level')), 'HIGH');
+    brain('goal', 'set', g.id, '--risk', 'HIGH');
+    const extra = brain('goal', 'question', 'add', g.id, 'Keep password login?');
+    brain('goal', 'question', 'dismiss', String(extra.id), 'covered by existing policy');
+    const r2 = brain('goal', 'intake', g.id);
+    expect(r2.ready).toBe(true);
+    expect(r2.nextAction).toBe('ready to lock');
+    const locked = brain('goal', 'lock', g.id);
+    expect(locked.status).toBe('LOCKED');
+    expect(JSON.parse(locked.contractSnapshot).answeredQuestions.length).toBeGreaterThanOrEqual(3);
+  });
 });

@@ -20,6 +20,8 @@ import { createFastEmbedder } from '../services/embedder.js';
 import { reindexEmbeddings } from '../services/embedding-store.js';
 import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
+import { buildIntakeReport } from '../services/intake.js';
+import * as questions from '../services/questions.js';
 
 export function buildServer(db: BrainDb): McpServer {
   const server = new McpServer({ name: 'central-brain', version: '0.1.0' });
@@ -199,6 +201,22 @@ export function buildServer(db: BrainDb): McpServer {
     path: z.string().optional(),
   }, (a) => importClaudeMem(db, a.path));
 
+  tool('brain_goal_intake', 'Intake report: related context, §9 gaps (auto-questions), review items, duplicate requirements', {
+    id: z.string(),
+  }, (a) => buildIntakeReport(db, embedder(), a.id));
+  tool('brain_question_add', 'Add a clarification question to an unlocked goal (material unless detail)', {
+    goalId: z.string(), question: z.string(), detail: z.boolean().optional(),
+  }, (a) => questions.addQuestion(db, a.goalId, { question: a.question, materiality: a.detail ? 'detail' : 'material' }));
+  tool('brain_question_answer', 'Answer a question; `as` also adds it as a contract line', {
+    id: z.number(), answer: z.string(),
+    as: z.enum(['constraint', 'exclusion', 'assumption', 'scope', 'permission', 'success_criterion']).optional(),
+  }, (a) => questions.answerQuestion(db, a.id, a.answer, { as: a.as }));
+  tool('brain_question_dismiss', 'Dismiss a question as not material (reason required)', {
+    id: z.number(), reason: z.string(),
+  }, (a) => questions.dismissQuestion(db, a.id, a.reason));
+  tool('brain_question_list', 'List a goal\'s questions (open = pending only)', {
+    goalId: z.string(), open: z.boolean().optional(),
+  }, (a) => questions.listQuestions(db, a.goalId, { open: a.open }));
   return server;
 }
 
