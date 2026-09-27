@@ -185,7 +185,7 @@ export function buildServer(db: BrainDb): McpServer {
   }, (a) => resumeGoal(db, a.id));
 
   // embeddings & import
-  tool('brain_embed_reindex', 'Embed all missing/stale rows locally (ONNX)', {},
+  tool('brain_embed_reindex', 'Embed all missing/stale rows locally (ONNX). Large backlogs can take many minutes; prefer the CLI (`brain embed reindex`, shows progress) for those', {},
     () => reindexEmbeddings(db, embedder()));
   tool('brain_import_claude_mem', 'One-time idempotent claude-mem observation import', {
     path: z.string().optional(),

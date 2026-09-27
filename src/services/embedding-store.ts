@@ -41,29 +41,46 @@ export function gatherEmbeddable(db: BrainDb): EmbeddableRow[] {
   return rows;
 }
 
-export async function reindexEmbeddings(db: BrainDb, embedder: Embedder): Promise<{ embedded: number; skipped: number }> {
-  const rows = gatherEmbeddable(db);
-  const pending: EmbeddableRow[] = [];
-  let skipped = 0;
-  for (const r of rows) {
-    const existing = db.select().from(embeddings).where(and(
-      eq(embeddings.sourceType, r.type), eq(embeddings.sourceId, r.id), eq(embeddings.model, embedder.model),
-    )).get();
-    if (existing && existing.contentHash === sha(r.text)) { skipped++; continue; }
-    pending.push(r);
+export interface ReindexOptions {
+  chunkSize?: number;
+  onProgress?: (done: number, total: number) => void;
+}
+
+export async function reindexEmbeddings(
+  db: BrainDb, embedder: Embedder, opts: ReindexOptions = {},
+): Promise<{ embedded: number; skipped: number }> {
+  const chunkSize = Math.max(1, opts.chunkSize ?? 256);
+  const existing = new Map<string, string>();
+  for (const e of db.select({ sourceType: embeddings.sourceType, sourceId: embeddings.sourceId, contentHash: embeddings.contentHash })
+    .from(embeddings).where(eq(embeddings.model, embedder.model)).all()) {
+    existing.set(`${e.sourceType}:${e.sourceId}`, e.contentHash);
   }
-  if (pending.length > 0) {
-    const vectors = await embedder.embed(pending.map(p => p.text));
-    for (let i = 0; i < pending.length; i++) {
-      const r = pending[i]!;
-      db.delete(embeddings).where(and(
-        eq(embeddings.sourceType, r.type), eq(embeddings.sourceId, r.id), eq(embeddings.model, embedder.model),
-      )).run();
-      db.insert(embeddings).values({
-        sourceType: r.type, sourceId: r.id, model: embedder.model,
-        contentHash: sha(r.text), vector: toBlob(vectors[i]!), createdAt: now(),
-      }).run();
-    }
+  const pending: { row: EmbeddableRow; hash: string }[] = [];
+  let skipped = 0;
+  for (const r of gatherEmbeddable(db)) {
+    const hash = sha(r.text);
+    if (existing.get(`${r.type}:${r.id}`) === hash) { skipped++; continue; }
+    pending.push({ row: r, hash });
+  }
+  let done = 0;
+  for (let start = 0; start < pending.length; start += chunkSize) {
+    const chunk = pending.slice(start, start + chunkSize);
+    const vectors = await embedder.embed(chunk.map(p => p.row.text));
+    // One synchronous transaction per chunk: a crash loses at most the current chunk.
+    db.transaction((tx) => {
+      const createdAt = now();
+      chunk.forEach(({ row: r, hash }, i) => {
+        tx.delete(embeddings).where(and(
+          eq(embeddings.sourceType, r.type), eq(embeddings.sourceId, r.id), eq(embeddings.model, embedder.model),
+        )).run();
+        tx.insert(embeddings).values({
+          sourceType: r.type, sourceId: r.id, model: embedder.model,
+          contentHash: hash, vector: toBlob(vectors[i]!), createdAt,
+        }).run();
+      });
+    });
+    done += chunk.length;
+    opts.onProgress?.(done, pending.length);
   }
   return { embedded: pending.length, skipped };
 }

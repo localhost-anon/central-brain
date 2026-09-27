@@ -226,7 +226,9 @@ verifyCmd.command('goal <goalId>').action((goalId) => run(() => out(goalVerifica
 // ---- embeddings & import ----
 const embedCmd = program.command('embed');
 embedCmd.command('reindex').description('Embed all missing/stale rows locally (ONNX)')
-  .action(() => runAsync(async () => out(await reindexEmbeddings(db(), embedder()))));
+  .action(() => runAsync(async () => out(await reindexEmbeddings(db(), embedder(), {
+    onProgress: (done, total) => process.stderr.write(`embedded ${done}/${total}\n`),
+  }))));
 
 const importCmd = program.command('import');
 importCmd.command('claude-mem [path]').description('One-time idempotent claude-mem import (§79)')
