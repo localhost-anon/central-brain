@@ -37,8 +37,9 @@ export function createFastEmbedder(
   };
   return {
     model: 'bge-small-en-v1.5',
-    // Measured bge-small cutoff on live data: related top1 0.75-0.82, unrelated top1 0.56-0.64.
-    minSimilarity: 0.68,
+    // Measured bge-small cutoff on live data: unrelated-query top1 0.56-0.638; a zero-keyword-overlap
+    // paraphrase of a known fact scored 0.653. Thin margin — tune here if recall/noise drifts.
+    minSimilarity: 0.64,
     async embed(texts: string[]): Promise<Float32Array[]> {
       if (texts.length === 0) return [];
       const m = await load();
