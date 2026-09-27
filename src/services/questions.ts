@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { goalQuestions, goals } from '../db/schema.js';
-import { addRequirement, getGoal, GoalLockedError, type GoalQuestion } from './goals.js';
+import { addRequirement, getGoal, GoalLockedError, openMaterialQuestions, type GoalQuestion } from './goals.js';
 
 export const ANSWER_AS_TYPES = ['constraint', 'exclusion', 'assumption', 'scope', 'permission', 'success_criterion'];
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
@@ -26,10 +26,7 @@ export function listQuestions(db: BrainDb, goalId: string, opts: { open?: boolea
 }
 
 export function refreshClarificationStatus(db: BrainDb, goalId: string): 'pending' | 'complete' {
-  const open = db.select().from(goalQuestions).where(and(
-    eq(goalQuestions.goalId, goalId), eq(goalQuestions.status, 'pending'), eq(goalQuestions.materiality, 'material'),
-  )).all().length;
-  const status = open > 0 ? 'pending' : 'complete';
+  const status = openMaterialQuestions(db, goalId).length > 0 ? 'pending' : 'complete';
   db.update(goals).set({ clarificationStatus: status }).where(eq(goals.id, goalId)).run();
   return status;
 }
@@ -56,13 +53,17 @@ export function answerQuestion(db: BrainDb, id: number, answer: string, opts: { 
   if (opts.as !== undefined && !ANSWER_AS_TYPES.includes(opts.as)) {
     throw new Error(`Invalid --as type: ${opts.as} (expected ${ANSWER_AS_TYPES.join(', ')})`);
   }
-  const requirementId = opts.as
-    ? addRequirement(db, q.goalId, { type: opts.as, description: answer.trim() }).id
-    : null;
-  db.update(goalQuestions).set({
-    answer: answer.trim(), status: 'answered', answeredAt: now(), requirementId,
-  }).where(eq(goalQuestions.id, id)).run();
-  refreshClarificationStatus(db, q.goalId);
+  const asType = opts.as;
+  // Requirement + answer + clarification status commit together or not at all.
+  db.transaction(() => {
+    const requirementId = asType
+      ? addRequirement(db, q.goalId, { type: asType, description: answer.trim() }).id
+      : null;
+    db.update(goalQuestions).set({
+      answer: answer.trim(), status: 'answered', answeredAt: now(), requirementId,
+    }).where(eq(goalQuestions.id, id)).run();
+    refreshClarificationStatus(db, q.goalId);
+  });
   return getQuestion(db, id);
 }
 

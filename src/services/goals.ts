@@ -68,7 +68,7 @@ export function listRequirements(db: BrainDb, goalId: string): Requirement[] {
   return db.select().from(goalRequirements).where(eq(goalRequirements.goalId, goalId)).all();
 }
 
-export function checkContract(db: BrainDb, goalId: string): ContractCheck {
+function contractGaps(db: BrainDb, goalId: string): ContractGap[] {
   const g = getGoal(db, goalId);
   const reqs = listRequirements(db, goalId);
   const gaps: ContractGap[] = [];
@@ -78,12 +78,33 @@ export function checkContract(db: BrainDb, goalId: string): ContractCheck {
   }
   if (!reqs.some(r => r.requirementType === 'scope')) gaps.push({ field: 'scope', message: 'No scope defined' });
   if (!g.riskLevel) gaps.push({ field: 'risk_level', message: 'Risk level not set' });
-  const openGapKeys = new Set(gaps.map(x => `missing:${x.field}`));
-  const openQuestions = db.select().from(goalQuestions).where(and(
+  return gaps;
+}
+
+function isFilledGapQuestion(q: GoalQuestion, gaps: ContractGap[]): boolean {
+  if (q.source !== 'brain' || !q.checkKey?.startsWith('missing:')) return false;
+  return !gaps.some(x => `missing:${x.field}` === q.checkKey);
+}
+
+function pendingMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
+  return db.select().from(goalQuestions).where(and(
     eq(goalQuestions.goalId, goalId), eq(goalQuestions.status, 'pending'), eq(goalQuestions.materiality, 'material'),
-  )).all().filter(q =>
-    // a Brain gap question stops blocking as soon as its field is filled (Review Focus 1)
-    !(q.source === 'brain' && q.checkKey?.startsWith('missing:') && !openGapKeys.has(q.checkKey)));
+  )).all();
+}
+
+/**
+ * The single definition of "open material question": pending + material, minus brain
+ * `missing:<field>` gap questions whose field is now filled (they stop blocking as soon as
+ * the contract covers them). Used by checkContract, refreshClarificationStatus and context.
+ */
+export function openMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
+  const gaps = contractGaps(db, goalId);
+  return pendingMaterialQuestions(db, goalId).filter(q => !isFilledGapQuestion(q, gaps));
+}
+
+export function checkContract(db: BrainDb, goalId: string): ContractCheck {
+  const gaps = contractGaps(db, goalId);
+  const openQuestions = openMaterialQuestions(db, goalId);
   return { ready: gaps.length === 0 && openQuestions.length === 0, gaps, openQuestions };
 }
 
@@ -152,25 +173,40 @@ export function lockGoal(db: BrainDb, id: string, opts: { force?: boolean; reaso
     ...check.gaps.map(x => x.message),
     ...check.openQuestions.map(q => `open question #${q.id}: ${q.question}`),
   ];
-  if (!check.ready) {
-    if (!opts.force) {
-      throw new ContractIncompleteError(`Cannot lock ${id}; contract incomplete (§9): ${unresolved.join('; ')}`);
-    }
-    addDecision(db, {
-      goalId: id, decision: `Force-locked ${id} with an incomplete contract`,
-      reason: `${opts.reason} | unresolved: ${unresolved.join('; ')}`, riskLevel: 'MEDIUM', reversible: true,
-    });
+  if (!check.ready && !opts.force) {
+    throw new ContractIncompleteError(`Cannot lock ${id}; contract incomplete (§9): ${unresolved.join('; ')}`);
   }
-  const answered = db.select().from(goalQuestions)
-    .where(and(eq(goalQuestions.goalId, id), eq(goalQuestions.status, 'answered'))).all();
-  const snapshot = JSON.stringify({
-    objective: g.objective, riskLevel: g.riskLevel, autonomyLevel: g.autonomyLevel,
-    requirements: listRequirements(db, id).map(r => ({
-      type: r.requirementType, description: r.description, priority: r.priority,
-    })),
-    answeredQuestions: answered.map(q => ({ question: q.question, answer: q.answer })),
+  // Brain gap questions whose field is filled are answered before freezing (same as intake),
+  // so a locked goal with no real open questions ends with clarificationStatus 'complete'.
+  const filledGapQuestions = pendingMaterialQuestions(db, id).filter(q => isFilledGapQuestion(q, check.gaps));
+  // better-sqlite3 transactions are connection-scoped, so addDecision(db, …) joins this transaction.
+  db.transaction((tx) => {
+    const ts = now();
+    for (const q of filledGapQuestions) {
+      tx.update(goalQuestions).set({ answer: 'filled via contract', status: 'answered', answeredAt: ts })
+        .where(eq(goalQuestions.id, q.id)).run();
+    }
+    if (!check.ready) {
+      addDecision(db, {
+        goalId: id, decision: `Force-locked ${id} with an incomplete contract`,
+        reason: `${opts.reason} | unresolved: ${unresolved.join('; ')}`, riskLevel: 'MEDIUM', reversible: true,
+      });
+    }
+    const answered = tx.select().from(goalQuestions)
+      .where(and(eq(goalQuestions.goalId, id), eq(goalQuestions.status, 'answered'))).all();
+    const snapshot = JSON.stringify({
+      objective: g.objective, riskLevel: g.riskLevel, autonomyLevel: g.autonomyLevel,
+      requirements: listRequirements(db, id).map(r => ({
+        type: r.requirementType, description: r.description, priority: r.priority,
+      })),
+      answeredQuestions: answered.map(q => ({ question: q.question, answer: q.answer })),
+    });
+    const clarificationStatus = check.openQuestions.length > 0 ? 'pending' : 'complete';
+    tx.update(goals).set({
+      status: 'LOCKED', updatedAt: ts, lockedAt: ts, contractSnapshot: snapshot, clarificationStatus,
+    }).where(eq(goals.id, id)).run();
   });
-  return setStatus(db, id, 'LOCKED', { lockedAt: now(), contractSnapshot: snapshot });
+  return getGoal(db, id);
 }
 
 export function startGoal(db: BrainDb, id: string): Goal {
