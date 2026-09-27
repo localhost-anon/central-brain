@@ -1,6 +1,6 @@
 import type { BrainDb } from '../db/connection.js';
 
-export type SearchType = 'knowledge' | 'learning' | 'decision' | 'failure' | 'goal';
+export type SearchType = 'knowledge' | 'learning' | 'decision' | 'failure' | 'goal' | 'observation';
 
 export interface SearchResult {
   type: SearchType;
@@ -46,6 +46,12 @@ const SOURCES: Record<SearchType, { sql: string }> = {
                  bm25(goals_fts) AS score, 'GOAL' AS scopeType, ('goal:' || g.id) AS scopeId
           FROM goals_fts f JOIN goals g ON g.rowid = f.rowid
           WHERE goals_fts MATCH ?`,
+  },
+  observation: {
+    sql: `SELECT 'observation' AS type, CAST(o.id AS TEXT) AS id, o.observation AS text,
+                 bm25(observations_fts) AS score, o.scope_type AS scopeType, o.scope_id AS scopeId
+          FROM observations_fts f JOIN observations o ON o.id = f.rowid
+          WHERE observations_fts MATCH ?`,
   },
 };
 
