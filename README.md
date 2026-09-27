@@ -12,3 +12,5 @@ Persistent goal-oriented memory for Claude Code. See ARCHITECTURE.md.
 - Failures: `brain failure add|search|show|resolve|solution` (the §66 reuse loop)
 - Verification: `brain verify add|goal` (passing runs drive requirement status)
 - Resume: `brain goal resume GOAL-…` (contract, work state, next action)
+- Semantic: `brain embed reindex` (local ONNX, model cached in ~/.central-brain/models); all `search` commands are hybrid FTS+vector
+- Import: `brain import claude-mem` (idempotent; observations carry `claude-mem:<id>` refs)
