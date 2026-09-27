@@ -3,6 +3,8 @@ import path from 'node:path';
 
 export interface Embedder {
   readonly model: string;
+  /** Cosine floor below which semantic hits are treated as noise (model-specific). */
+  readonly minSimilarity?: number;
   embed(texts: string[]): Promise<Float32Array[]>;
 }
 
@@ -35,6 +37,8 @@ export function createFastEmbedder(
   };
   return {
     model: 'bge-small-en-v1.5',
+    // Measured bge-small cutoff on live data: related top1 0.75-0.82, unrelated top1 0.56-0.64.
+    minSimilarity: 0.68,
     async embed(texts: string[]): Promise<Float32Array[]> {
       if (texts.length === 0) return [];
       const m = await load();

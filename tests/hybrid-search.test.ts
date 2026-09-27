@@ -3,7 +3,7 @@ import { createTestDb } from './helpers.js';
 import { fakeEmbedder } from '../src/services/embedder.js';
 import { reindexEmbeddings } from '../src/services/embedding-store.js';
 import { hybridSearch } from '../src/services/hybrid-search.js';
-import { addKnowledge } from '../src/services/knowledge.js';
+import { addKnowledge, invalidateKnowledge } from '../src/services/knowledge.js';
 import { addObservation } from '../src/services/decisions.js';
 import { search } from '../src/services/search.js';
 
@@ -43,5 +43,29 @@ describe('hybrid search', () => {
     const onlyK = await hybridSearch(db, e, 'alpha', { types: ['knowledge'] });
     expect(onlyK.every(h => h.type === 'knowledge')).toBe(true);
     expect((await hybridSearch(db, e, 'alpha', { limit: 1 })).length).toBe(1);
+  });
+  it('drops semantic hits below the similarity floor', async () => {
+    const db = createTestDb();
+    const e = fakeEmbedder();
+    const o = addObservation(db, { observation: 'tv application children videos' });
+    await reindexEmbeddings(db, e);
+    // query has no FTS match, so any hit is semantic-only
+    const q = 'children tv watching';
+    expect(search(db, q)).toHaveLength(0);
+    const without = await hybridSearch(db, e, q);
+    expect(without.some(h => h.type === 'observation' && h.id === String(o.id))).toBe(true);
+    expect(await hybridSearch(db, e, q, { minSimilarity: 0.99 })).toEqual([]);
+  });
+
+  it('does not return invalidated knowledge via stale embeddings', async () => {
+    const db = createTestDb();
+    const e = fakeEmbedder();
+    const k = addKnowledge(db, { scopeType: 'GLOBAL', statement: 'kidtube runs on tizen televisions' });
+    await reindexEmbeddings(db, e);
+    const q = 'tizen televisions kidtube app';
+    expect(search(db, q)).toHaveLength(0);
+    expect((await hybridSearch(db, e, q)).some(h => h.type === 'knowledge' && h.id === String(k.id))).toBe(true);
+    invalidateKnowledge(db, k.id);
+    expect((await hybridSearch(db, e, q)).some(h => h.type === 'knowledge' && h.id === String(k.id))).toBe(false);
   });
 });

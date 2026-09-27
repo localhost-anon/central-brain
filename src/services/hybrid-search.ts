@@ -7,18 +7,19 @@ const RRF_K = 60;
 
 export async function hybridSearch(
   db: BrainDb, embedder: Embedder, query: string,
-  opts: { types?: SearchType[]; limit?: number } = {},
+  opts: { types?: SearchType[]; limit?: number; minSimilarity?: number } = {},
 ): Promise<SearchResult[]> {
   if (!query.trim()) return [];
   const limit = opts.limit ?? 20;
   const fts = search(db, query, { types: opts.types, limit: limit * 2 });
 
+  const floor = opts.minSimilarity ?? embedder.minSimilarity ?? 0;
   const [qv] = await embedder.embed([query]);
   const stored = loadEmbeddings(db, embedder.model)
     .filter(e => !opts.types || opts.types.includes(e.sourceType as SearchType));
   const semantic = stored
     .map(e => ({ e, sim: cosine(qv!, fromBlob(e.vector as Buffer)) }))
-    .filter(s => s.sim > 0)
+    .filter(s => s.sim > 0 && s.sim >= floor)
     .sort((a, b) => b.sim - a.sim)
     .slice(0, limit * 2);
 
