@@ -35,7 +35,12 @@ export const goalQuestions = sqliteTable('goal_questions', {
   status: text('status').notNull().default('pending'),
   createdAt: text('created_at').notNull(),
   answeredAt: text('answered_at'),
-});
+  materiality: text('materiality').notNull().default('material'),
+  source: text('source').notNull().default('session'),
+  checkKey: text('check_key'),
+  requirementId: integer('requirement_id'),
+  statusReason: text('status_reason'),
+}, (t) => [uniqueIndex('goal_questions_goal_check').on(t.goalId, t.checkKey)]);
 
 export const decisions = sqliteTable('decisions', {
   id: integer('id').primaryKey({ autoIncrement: true }),

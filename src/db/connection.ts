@@ -19,6 +19,27 @@ export function packageRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
+function migrationsFolder(): string {
+  return path.join(packageRoot(), 'drizzle');
+}
+
+export function appliedMigrations(db: BrainDb): number {
+  try {
+    return (db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').get() as { n: number }).n;
+  } catch {
+    return 0; // fresh DB: migrations table does not exist yet
+  }
+}
+
+export function pendingMigrations(db: BrainDb): number {
+  const journal = JSON.parse(fs.readFileSync(path.join(migrationsFolder(), 'meta', '_journal.json'), 'utf8'));
+  return Math.max(0, journal.entries.length - appliedMigrations(db));
+}
+
+export function snapshotDir(db: BrainDb): string {
+  return path.join(path.dirname(db.$client.name), 'backups');
+}
+
 export function openDb(dbPath: string = resolveDbPath()): BrainDb {
   if (dbPath !== ':memory:') {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -31,16 +52,9 @@ export function openDb(dbPath: string = resolveDbPath()): BrainDb {
 }
 
 export function migrateDb(db: BrainDb): void {
-  const folder = path.join(packageRoot(), 'drizzle');
-  try {
-    const journal = JSON.parse(fs.readFileSync(path.join(folder, 'meta', '_journal.json'), 'utf8'));
-    const total = journal.entries.length;
-    const applied = (db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').get() as { n: number }).n;
-    if (applied > 0 && applied < total && db.$client.name !== ':memory:') {
-      backupDb(db);
-    }
-  } catch {
-    // fresh DB (no migrations table yet) or unreadable journal: nothing to protect
+  const applied = appliedMigrations(db);
+  if (applied > 0 && pendingMigrations(db) > 0 && db.$client.name !== ':memory:') {
+    backupDb(db, snapshotDir(db));
   }
-  migrate(db, { migrationsFolder: folder });
+  migrate(db, { migrationsFolder: migrationsFolder() });
 }
