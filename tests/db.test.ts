@@ -42,10 +42,16 @@ describe('database', () => {
 
   it('phase 3 schema: embeddings table and observations_fts exist', () => {
     const db = createTestDb();
-    const names = db.$client.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND (name='embeddings' OR name LIKE 'observations%')"
-    ).all() as { name: string }[];
-    expect(names.map((r) => r.name)).toContain('embeddings');
-    expect(names.map((r) => r.name)).toContain('observations_fts');
+    const names = db.$client
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all().map((r: any) => r.name);
+    expect(names).toContain('embeddings');
+    expect(names).toContain('observations_fts');
+    db.$client.prepare(
+      "INSERT INTO observations (observation, created_at) VALUES ('truenas hosts seafile', ?)"
+    ).run(new Date().toISOString());
+    const hits = db.$client.prepare(
+      "SELECT rowid FROM observations_fts WHERE observations_fts MATCH 'seafile'").all();
+    expect(hits.length).toBe(1);
   });
 });
