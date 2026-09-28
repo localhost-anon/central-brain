@@ -135,9 +135,18 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
       }
       const goal = createGoal(ctx.db, { title, objective });
       await buildIntakeReport(ctx.db, ctx.embedder(), goal.id);
-      const run = b.startWorker === false ? null : ctx.workers.start(goal.id, { cwd });
+      // The goal is already committed: a worker launch failure must not surface as a failed
+      // create (the UI would retry and duplicate the goal), so report it alongside the 201.
+      let run: unknown = null;
+      let workerError: string | undefined;
+      if (b.startWorker !== false) {
+        try { run = ctx.workers.start(goal.id, { cwd }); } catch (e) { workerError = (e as Error).message; }
+      }
       ctx.announce(goal.id);
-      send(res, 201, { goal: getGoal(ctx.db, goal.id), run }); return true;
+      send(res, 201, workerError === undefined
+        ? { goal: getGoal(ctx.db, goal.id), run }
+        : { goal: getGoal(ctx.db, goal.id), run: null, workerError });
+      return true;
     }
     let q = m(/^\/api\/questions\/(\d+)\/(answer|dismiss)$/);
     if (req.method === 'POST' && q) {

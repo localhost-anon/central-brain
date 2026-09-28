@@ -28,12 +28,13 @@ function stubWorkers() {
   return { w, calls };
 }
 
-async function boot() {
+async function boot(tweak?: (w: WorkerControl) => void) {
   const db = createTestDb();
   const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-web-'));
   fs.writeFileSync(path.join(webRoot, 'index.html'), '<title>Central Brain</title>');
   fs.writeFileSync(path.join(webRoot, 'app.js'), 'console.log(1)');
   const { w, calls } = stubWorkers();
+  tweak?.(w);
   const s = await startUiServer({ db, workers: w, embedder: () => fakeEmbedder(), port: 0, webRoot, defaultCwd: '/tmp/projects' });
   closers.push(s.close);
   const origin = `http://127.0.0.1:${s.port}`;
@@ -76,6 +77,16 @@ describe('web API', () => {
     expect(listQuestions(db, r.json.goal.id).map(q => q.checkKey)).toContain('review:behaviour');
     expect(calls).toContainEqual(['start', r.json.goal.id, { cwd: '/Users/x/kidtube' }]);
     expect((await req('POST', '/api/goals', { title: ' ', objective: 'o' })).status).toBe(400);
+  });
+
+  it('worker launch failure still creates the goal once and reports workerError', async () => {
+    const { req } = await boot(w => { w.start = () => { throw new Error('claude not found'); }; });
+    const r = await req('POST', '/api/goals', { title: 'Solo', objective: 'o', startWorker: true });
+    expect(r.status).toBe(201);
+    expect(r.json.workerError).toBe('claude not found');
+    expect(r.json.run).toBeNull();
+    const list = (await req('GET', '/api/goals')).json;
+    expect(list.filter((x: any) => x.id === r.json.goal.id)).toHaveLength(1);
   });
 
   it('lists goals with counts, returns detail with timeline, 404s unknown ids (Review Focus 4)', async () => {
