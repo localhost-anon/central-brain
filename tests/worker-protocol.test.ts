@@ -58,6 +58,10 @@ describe('worker protocol', () => {
     expect(p).toContain('GOAL-2026-0099');
     expect(p).toContain('brain_question_add');
     expect(p).toMatch(/never answer/i);
+    expect(p).toContain('force');
+    expect(p).toContain('brain_goal_block');
+    expect(p).toContain('approval card');
+    expect(p).not.toMatch(/through a Brain question/i);
     expect(firstMessage({ id: 'GOAL-1', title: 'T', objective: 'O' })).toContain('brain_goal_intake');
   });
 });

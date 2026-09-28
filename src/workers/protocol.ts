@@ -100,7 +100,10 @@ export function workerSystemPrompt(goalId: string): string {
     `You are a Central Brain worker launched from the Brain web UI to carry out goal ${goalId}. Work only on this goal.`,
     'Follow the Central Brain rules in the global CLAUDE.md: run brain_goal_intake, fill contract gaps you can discover, and record decisions, failures and verifications as you go.',
     'Never answer material questions or the review:behaviour question yourself. For every behaviour choice a user would notice and every other material question, call brain_question_add (or leave the intake question open), then END YOUR TURN. The user answers in the Brain UI; you will be told when to continue.',
-    'Stay inside the locked scope. Pushes, deploys, data deletion and production changes need the user\'s explicit OK — ask through a Brain question.',
+    'Before locking: list every push, deploy, data deletion or production change you anticipate as part of your review:behaviour / material questions, so the user decides them up front.',
+    'Lock only after the user has answered every open question; never call brain_goal_lock with force.',
+    'Stay inside the locked scope. After lock: when you need a push, deploy, deletion or production change, just attempt it — the harness routes risky actions to the user as an approval card. If the user denies it, never retry it or work around it; record the denial as a decision (brain_decision_add) and adapt.',
+    'If you need the user\'s input after lock, call brain_goal_block with the question as the reason and end your turn.',
     'Finish only through brain_verification_record for each success criterion followed by brain_goal_complete.',
   ].join('\n');
 }
@@ -110,6 +113,6 @@ export const firstMessage = (g: { id: string; title: string; objective: string }
 export const answersMessage = (goalId: string) =>
   `Your questions for ${goalId} have been answered in Brain. Read them with brain_question_list (goalId ${goalId}) and continue.`;
 export const nudgeMessage = (goalId: string) =>
-  `Continue ${goalId} until it is verified complete, or ask the user through Brain questions and end your turn.`;
+  `Continue ${goalId} until it is verified complete. If you need the user: before lock, add a Brain question and end your turn; after lock, call brain_goal_block with your question and end your turn.`;
 export const resumeMessage = (goalId: string) =>
   `Resume work on ${goalId}: run brain_goal_resume, check for answered questions, and continue.`;
