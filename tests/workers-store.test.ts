@@ -57,4 +57,17 @@ describe('worker store', () => {
     expect(pendingApprovals(db)).toHaveLength(0);
     expect(() => decidePermission(db, a.id, 'allow')).toThrow(/already/);
   });
+
+  it('breaks created_at ties by insertion order', () => {
+    const db = createTestDb();
+    const g1 = createGoal(db, { title: 'a', objective: 'a' });
+    const g2 = createGoal(db, { title: 'b', objective: 'b' });
+    const r1 = createRun(db, { goalId: g1.id, cwd: '/tmp' });
+    const r2 = createRun(db, { goalId: g2.id, cwd: '/tmp' });
+    const r3 = createRun(db, { goalId: g1.id, cwd: '/tmp' });
+    db.$client.prepare('UPDATE worker_runs SET created_at = ?').run('2026-01-01T00:00:00.000Z');
+    expect(queuedRuns(db).map(r => r.id)).toEqual([r1.id, r2.id, r3.id]);
+    expect(listRuns(db, g1.id).map(r => r.id)).toEqual([r3.id, r1.id]);
+    expect(activeRunForGoal(db, g1.id)?.id).toBe(r3.id);
+  });
 });

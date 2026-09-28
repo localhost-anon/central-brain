@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { BrainDb } from '../db/connection.js';
 import { approvals, workerEvents, workerRuns } from '../db/schema.js';
@@ -39,17 +39,17 @@ export function updateRun(
 }
 
 export function listRuns(db: BrainDb, goalId: string): WorkerRun[] {
-  return db.select().from(workerRuns).where(eq(workerRuns.goalId, goalId)).orderBy(desc(workerRuns.createdAt)).all();
+  return db.select().from(workerRuns).where(eq(workerRuns.goalId, goalId)).orderBy(desc(workerRuns.createdAt), desc(sql`rowid`)).all();
 }
 
 export function activeRunForGoal(db: BrainDb, goalId: string): WorkerRun | undefined {
   return db.select().from(workerRuns)
     .where(and(eq(workerRuns.goalId, goalId), inArray(workerRuns.status, [...ACTIVE_RUN_STATUSES])))
-    .orderBy(desc(workerRuns.createdAt)).get();
+    .orderBy(desc(workerRuns.createdAt), desc(sql`rowid`)).get();
 }
 
 export function queuedRuns(db: BrainDb): WorkerRun[] {
-  return db.select().from(workerRuns).where(eq(workerRuns.status, 'queued')).orderBy(asc(workerRuns.createdAt)).all();
+  return db.select().from(workerRuns).where(eq(workerRuns.status, 'queued')).orderBy(asc(workerRuns.createdAt), asc(sql`rowid`)).all();
 }
 
 export function addEvent(db: BrainDb, runId: string, e: { kind: string; summary: string; detail?: string }): WorkerEvent {
