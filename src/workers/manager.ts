@@ -8,7 +8,7 @@ import { getGoal, openMaterialQuestions } from '../services/goals.js';
 import type { Approval } from '../services/decisions.js';
 import {
   ACTIVE_RUN_STATUSES, activeRunForGoal, addEvent, createPermissionApproval, createRun, decidePermission,
-  getRun, listRuns, queuedRuns, updateRun, type WorkerEvent, type WorkerRun,
+  getRun, listRuns, pendingApprovals, queuedRuns, updateRun, type WorkerEvent, type WorkerRun,
 } from '../services/workers.js';
 import {
   answersMessage, eventsFor, firstMessage, initializeRequest, nudgeMessage, parseWorkerLine,
@@ -36,9 +36,14 @@ export function readMaxWorkers(configPath = path.join(os.homedir(), '.central-br
   } catch { return 2; }
 }
 
-interface Live { child: ChildProcessWithoutNullStreams; goalId: string; nudged: boolean; stderr: string; ended: boolean }
+interface Live {
+  child: ChildProcessWithoutNullStreams; goalId: string; nudged: boolean; stderr: string; ended: boolean;
+  killTimer?: NodeJS.Timeout;
+}
 const now = () => new Date().toISOString();
 const END_STATES = ['completed', 'stopped', 'failed'];
+/** Grace period between SIGTERM / stdin close and SIGKILL. */
+const KILL_AFTER_MS = 5000;
 
 export class WorkerManager implements WorkerControl {
   private live = new Map<string, Live>();
@@ -75,6 +80,8 @@ export class WorkerManager implements WorkerControl {
     if (activeRunForGoal(this.db, goalId)) throw new Error(`Goal ${goalId} already has an active worker.`);
     const last = listRuns(this.db, goalId).find(r => r.sessionId);
     if (!last) return this.start(goalId);
+    // The previous process for this run id is still exiting; relaunching now would share its live slot.
+    if (this.live.has(last.id)) throw new Error(`Worker for ${goalId} is still shutting down; try again in a moment.`);
     this.pendingFirst.set(last.id, resumeMessage(goalId));
     this.setStatus(last.id, 'queued', { exitReason: null, endedAt: null });
     this.pump();
@@ -82,14 +89,20 @@ export class WorkerManager implements WorkerControl {
   }
 
   stop(runId: string): WorkerRun {
+    const run = getRun(this.db, runId);
+    if (END_STATES.includes(run.status)) return run;
     const l = this.live.get(runId);
+    this.pendingFirst.delete(runId);
     this.setStatus(runId, 'stopped', { endedAt: now(), exitReason: 'stopped by user' });
-    if (l) { l.ended = true; l.child.kill('SIGTERM'); }
+    if (l) this.terminate(l);
     return getRun(this.db, runId);
   }
 
   stopAll(): void {
-    for (const id of [...this.live.keys()]) this.stop(id);
+    for (const [id, l] of [...this.live.entries()]) {
+      if (END_STATES.includes(getRun(this.db, id).status)) this.terminate(l);   // already finished, still exiting
+      else this.stop(id);
+    }
   }
 
   answersUpdated(goalId: string): void {
@@ -113,7 +126,8 @@ export class WorkerManager implements WorkerControl {
     const l = a.runId ? this.live.get(a.runId) : undefined;
     if (l && !l.ended && a.requestId) {
       this.write(l, permissionResponse(a.requestId, decision, JSON.parse(a.requestJson ?? '{}'), note));
-      this.setStatus(a.runId!, 'working');
+      const stillPending = pendingApprovals(this.db).some(p => p.runId === a.runId);
+      if (!stillPending) this.setStatus(a.runId!, 'working');
     }
     return a;
   }
@@ -136,12 +150,15 @@ export class WorkerManager implements WorkerControl {
     child.stdin.on('error', () => { /* worker gone; exit handler reports it */ });
     readline.createInterface({ input: child.stdout }).on('line', line => this.onLine(run.id, l, line));
     child.on('exit', code => this.onExit(run.id, l, code));
+    child.on('error', err => this.onSpawnError(run.id, l, err));
     this.write(l, initializeRequest());
     this.write(l, userMessage(this.pendingFirst.get(run.id) ?? resumeMessage(run.goalId)));
     this.pendingFirst.delete(run.id);
   }
 
   private onLine(runId: string, l: Live, line: string): void {
+    // Output from a stopped/finished or superseded process must not revive the run.
+    if (l.ended || this.live.get(runId) !== l) return;
     const msg = parseWorkerLine(line);
     for (const e of eventsFor(msg)) {
       this.emit({ type: 'worker-event', goalId: l.goalId, runId, event: addEvent(this.db, runId, e) });
@@ -183,14 +200,45 @@ export class WorkerManager implements WorkerControl {
     this.setStatus(runId, status, { endedAt: now(), exitReason: reason });
     l.ended = true;
     l.child.stdin.end();
+    this.armKill(l);
+  }
+
+  /** SIGTERM now, SIGKILL if the child is still around after the grace period. */
+  private terminate(l: Live): void {
+    l.ended = true;
+    l.child.kill('SIGTERM');
+    this.armKill(l);
+  }
+
+  private armKill(l: Live): void {
+    if (l.killTimer || l.child.exitCode !== null || l.child.signalCode !== null) return;
+    l.killTimer = setTimeout(() => {
+      if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL');
+    }, KILL_AFTER_MS);
+    l.killTimer.unref();
   }
 
   private onExit(runId: string, l: Live, code: number | null): void {
+    if (l.killTimer) { clearTimeout(l.killTimer); l.killTimer = undefined; }
+    if (this.live.get(runId) !== l) return;   // superseded, or already handled by onSpawnError
     this.live.delete(runId);
     const run = getRun(this.db, runId);
     if (!l.ended && !END_STATES.includes(run.status)) {
       const tail = l.stderr.trim() ? ` — ${l.stderr.trim().split('\n').slice(-3).join(' | ')}` : '';
       this.setStatus(runId, 'failed', { endedAt: now(), exitReason: `exit code ${code ?? 'signal'}${tail}` });
+    }
+    l.ended = true;
+    this.pump();
+  }
+
+  private onSpawnError(runId: string, l: Live, err: Error): void {
+    if (l.killTimer) { clearTimeout(l.killTimer); l.killTimer = undefined; }
+    if (this.live.get(runId) !== l) return;
+    this.live.delete(runId);
+    const wasEnded = l.ended;
+    l.ended = true;
+    if (!wasEnded && !END_STATES.includes(getRun(this.db, runId).status)) {
+      this.setStatus(runId, 'failed', { endedAt: now(), exitReason: `spawn error: ${err.message}` });
     }
     this.pump();
   }

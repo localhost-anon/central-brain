@@ -21,14 +21,15 @@ async function waitFor<T>(fn: () => T | undefined | false, ms = 8000): Promise<T
   }
 }
 
-function setup(scenario: string, maxWorkers = 2) {
+function setup(scenario: string, maxWorkers = 2, opts: { onTerm?: string; command?: string[] } = {}) {
   const db = createTestDb();
   const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'brain-fake-')), 'log.jsonl');
   process.env.FAKE_SCENARIO = scenario;
   process.env.FAKE_LOG = logFile;
+  if (opts.onTerm) process.env.FAKE_ON_TERM = opts.onTerm; else delete process.env.FAKE_ON_TERM;
   const events: ManagerEvent[] = [];
   const m = new WorkerManager(db, {
-    command: [process.execPath, FAKE], maxWorkers, defaultCwd: os.tmpdir(), onEvent: e => events.push(e),
+    command: opts.command ?? [process.execPath, FAKE], maxWorkers, defaultCwd: os.tmpdir(), onEvent: e => events.push(e),
   });
   managers.push(m);
   const sent = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : []);
@@ -127,7 +128,7 @@ describe('worker manager', () => {
     const { db, m, sent } = setup('stall');
     const g = createGoal(db, { title: 't', objective: 'o' });
     const run = m.start(g.id);
-    await waitFor(() => getRun(db, run.id).status === 'stopped');
+    await waitFor(() => getRun(db, run.id).status === 'stopped' && m.runningCount() === 0);
     const again = m.resume(g.id);
     expect(again.id).toBe(run.id);
     await waitFor(() => sent().filter(s => s.argv).length === 2);
@@ -153,6 +154,69 @@ describe('worker manager', () => {
     const [a] = pendingApprovals(db, g.id);
     expect(m.decide(a.id, 'allow').status).toBe('approved');
   });
+
+  it('ignores late output from a stopped worker (no revival, no new approval card)', async () => {
+    const { db, m } = setup('permission', 2, { onTerm: 'late-output' });
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    const run = m.start(g.id);
+    await waitFor(() => getRun(db, run.id).status === 'waiting_approval');
+    m.stop(run.id);
+    await waitFor(() => m.runningCount() === 0);
+    expect(getRun(db, run.id)).toMatchObject({ status: 'stopped', sessionId: 'fake-session-1' });
+    expect(pendingApprovals(db, g.id).map(a => a.requestId)).toEqual(['r-1']);
+  });
+
+  it('refuses resume while the old process is still exiting, then resumes cleanly', async () => {
+    const { db, m } = setup('permission', 2, { onTerm: 'late-output' });
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    const run = m.start(g.id);
+    await waitFor(() => getRun(db, run.id).status === 'waiting_approval');
+    m.stop(run.id);
+    expect(() => m.resume(g.id)).toThrow(/still shutting down/);
+    await waitFor(() => m.runningCount() === 0);
+    const again = m.resume(g.id);
+    expect(again.id).toBe(run.id);
+    expect(m.runningCount()).toBe(1);
+    await waitFor(() => getRun(db, run.id).status === 'waiting_approval');
+    expect(m.runningCount()).toBe(1);
+  });
+
+  it('a missing binary fails the run with a spawn error and frees the slot', async () => {
+    const { db, m } = setup('stall', 1, { command: ['/nonexistent/claude-xyz'] });
+    const g1 = createGoal(db, { title: 'a', objective: 'a' });
+    const g2 = createGoal(db, { title: 'b', objective: 'b' });
+    const r1 = m.start(g1.id);
+    const r2 = m.start(g2.id);
+    await waitFor(() => getRun(db, r1.id).status === 'failed');
+    expect(getRun(db, r1.id).exitReason).toMatch(/^spawn error: /);
+    await waitFor(() => getRun(db, r2.id).status === 'failed');   // it left the queue and was launched
+    expect(getRun(db, r2.id).exitReason).toMatch(/^spawn error: /);
+    expect(m.runningCount()).toBe(0);
+  });
+
+  it('stop() on a completed run leaves it completed', async () => {
+    const { db, m } = setup('stall');
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    makeLockable(db, g.id); lockGoal(db, g.id); completeGoal(db, g.id, { force: true });
+    const run = m.start(g.id);
+    await waitFor(() => getRun(db, run.id).status === 'completed');
+    expect(m.stop(run.id).status).toBe('completed');
+    expect(getRun(db, run.id).exitReason).toBeNull();
+  });
+
+  it('SIGKILLs a worker that ignores SIGTERM', async () => {
+    const { db, m } = setup('permission', 2, { onTerm: 'ignore' });
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    const run = m.start(g.id);
+    await waitFor(() => getRun(db, run.id).status === 'waiting_approval');
+    const t0 = Date.now();
+    m.stop(run.id);
+    await new Promise(r => setTimeout(r, 1000));
+    expect(m.runningCount()).toBe(1);             // SIGTERM alone did not end it
+    await waitFor(() => m.runningCount() === 0, 8000);
+    expect(Date.now() - t0).toBeLessThan(6500);
+    expect(getRun(db, run.id).status).toBe('stopped');
+  }, 15000);
 
   it('reads maxWorkers from config with default 2', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-cfg-'));

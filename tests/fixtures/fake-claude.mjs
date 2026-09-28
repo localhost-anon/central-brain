@@ -33,3 +33,16 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   result();
 });
 process.stdin.on('end', () => process.exit(0));
+
+// FAKE_ON_TERM: 'late-output' → on SIGTERM print a late init + permission request, exit after 200 ms;
+//               'ignore'      → ignore SIGTERM entirely (only SIGKILL ends it).
+const onTerm = process.env.FAKE_ON_TERM;
+if (onTerm === 'late-output') {
+  process.on('SIGTERM', () => {
+    out({ type: 'system', subtype: 'init', session_id: 'fake-session-late' });
+    out({ type: 'control_request', request_id: 'r-late', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'rm -rf /' } } });
+    setTimeout(() => process.exit(0), 200);
+  });
+} else if (onTerm === 'ignore') {
+  process.on('SIGTERM', () => { /* ignored on purpose */ });
+}
