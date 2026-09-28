@@ -1,7 +1,14 @@
 import { Command } from 'commander';
+import { spawn } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import {
   openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, type BrainDb,
+  packageRoot,
 } from '../db/connection.js';
+import { WorkerManager } from '../workers/manager.js';
+import { ChangeFeed } from '../web/change-feed.js';
+import { startUiServer } from '../web/server.js';
 import { backupDb } from '../db/backup.js';
 import * as goals from '../services/goals.js';
 import * as work from '../services/work.js';
@@ -296,5 +303,34 @@ modelCmd.command('recommend').description('Recommend a Claude model (§12.1)')
   .action((o) => run(() => out(recommendModel(db(), {
     goalId: o.goal, complexity: o.complexity as Complexity | undefined,
   }))));
+
+// ---- web UI ----
+program.command('ui').description('Start the Brain web UI on 127.0.0.1 (launches Claude workers)')
+  .option('--port <n>', 'port', '4410').option('--no-open', 'do not open the browser')
+  .action((o) => runAsync(async () => {
+    const d = db();
+    let ui: Awaited<ReturnType<typeof startUiServer>> | null = null;
+    const manager = new WorkerManager(d, {
+      defaultCwd: path.join(os.homedir(), 'Projects'),
+      // Test hook: BRAIN_WORKER_COMMAND='["node","tests/fixtures/fake-claude.mjs"]' swaps the real claude binary.
+      command: process.env.BRAIN_WORKER_COMMAND ? JSON.parse(process.env.BRAIN_WORKER_COMMAND) : undefined,
+      onEvent: (e) => {
+        if (!ui) return;
+        if (e.type === 'worker-event') ui.broadcast('worker-event', e);
+        else { ui.broadcast('run-changed', e); ui.announce(e.goalId); }
+      },
+    });
+    const feed = new ChangeFeed(d);
+    const server = ui = await startUiServer({
+      db: d, workers: manager, feed, embedder, port: Number(o.port),
+      webRoot: path.join(packageRoot(), 'web'), defaultCwd: path.join(os.homedir(), 'Projects'),
+    });
+    feed.start();
+    out({ url: server.url });
+    if (o.open && process.platform === 'darwin') spawn('open', [server.url], { stdio: 'ignore', detached: true }).unref();
+    const shutdown = async () => { manager.stopAll(); feed.stop(); await server.close(); process.exit(0); };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  }));
 
 await program.parseAsync();
