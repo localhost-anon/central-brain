@@ -27,6 +27,8 @@
 - Tests never touch live services. The only network use is `127.0.0.1`.
 - Never store secrets in Brain. Profiles hold env var **names** only.
 - Schema changes go in migration `0006` only, and are additive. The live DB is migrated only by an explicit `brain migrate` that the user runs.
+  - Explicit `brain` CLI commands auto-migrate the DB they open. So no task may run a `brain` command against the live DB until the user has run `brain migrate`. The controller asks for this before Task 6 Step 9.
+- Where to execute: start only after `worktree-web-ui` is merged to `main` (spec §1). Use a fresh worktree from `main`. Rebuild `dist` only there, never in a checkout whose `dist` a running `brain ui` is serving.
 - `gate_audit` is append-only, enforced by SQLite triggers.
 - Phase A blocks nothing: `completeGoal` is unchanged.
 - Commit trailers on every commit:
@@ -1847,7 +1849,7 @@ shasum -a 256 -c /tmp/brain-before.sha
 
 Expected: `OK`. If the live `brain ui` (GOAL-0010 run) is writing concurrently, the checksum can legitimately change. In that case stop the live UI for this check, or compare `PRAGMA data_version` plus row counts instead, and say which method you used.
 
-- [ ] **Step 9: Run through Brain (integration)**
+- [ ] **Step 9: Run through Brain (integration)** (precondition: the user has run `brain migrate` on the live DB; the controller confirms before this step)
 
 Run: `node dist/cli/index.js test run api --goal GOAL-2026-0011 && node dist/cli/index.js test run web --goal GOAL-2026-0011`
 Expected: both exit 0 with `"passed": true` and `"sandbox": "network-loopback"`. This writes to the Brain DB in use; in this worktree that is the live DB, which is intended because this is real evidence. If the web suite fails **only** under the sandbox, capture the log tail, run it with `--no-sandbox`, and report it as a concern with the log excerpt. Do not weaken the sandbox profile silently.
@@ -1948,7 +1950,7 @@ Run: `npx vitest run tests/worker-protocol.test.ts && npm test && npm run build`
 - [ ] **Step 1:** `npm test && npm run build` → record the pass count (criterion 6).
 - [ ] **Step 2:** Run the checksum check from Task 6 Step 8, plus `brain test run api` and `brain test run web` → record criteria 1 and 2 with the audit row ids and `sandbox` value.
 - [ ] **Step 3:** Run the Task 7 Step 5 review → record criterion 3. Also attempt `brain review record` against that review after a new commit and paste the refusal.
-- [ ] **Step 4:** `sqlite3 ~/.central-brain/brain.db "UPDATE gate_audit SET actor='x'"` → paste the abort message (criterion 4).
+- [ ] **Step 4:** Make a copy with `sqlite3 ~/.central-brain/brain.db ".backup <scratchpad>/copy.db"` (never write to the live file). On the copy, run `UPDATE gate_audit SET actor='x'` and `DELETE FROM gate_audit` → paste both abort messages (criterion 4).
 - [ ] **Step 5:** `brain gate stats` → paste the output (criterion 5).
 - [ ] **Step 6:** Time a small change end to end: a one-line edit, then `review package` → reviewer → `record` → `test run api` → `test run web`. Compare the wall-clock time against the 5 min target (criterion 7), and record it as a Brain observation.
 - [ ] **Step 7:** `brain_verification_record` each criterion with its real evidence. Store knowledge: "central-brain has Brain-run e2e suites (`.brain/test-profile.json`)". Leave GOAL-0011 **executing**: Phase A is done, and Phase B starts after 5 real-goal reviews.
