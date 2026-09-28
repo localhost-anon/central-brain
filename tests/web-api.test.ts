@@ -111,6 +111,9 @@ describe('web API', () => {
     const run = createRun(db, { goalId: g.id, cwd: '/tmp' });
     const a = createPermissionApproval(db, { goalId: g.id, runId: run.id, requestId: 'r1', toolName: 'Bash', input: { command: 'ls' } });
     expect((await req('GET', '/api/needs-you')).json.approvals.map((x: any) => x.id)).toContain(a.id);
+    const detailApproval = (await req('GET', `/api/goals/${g.id}`)).json.approvals[0];
+    expect(detailApproval).toMatchObject({ id: a.id, runId: run.id, toolName: 'Bash', status: 'pending' });
+    expect(JSON.parse(detailApproval.requestJson)).toEqual({ command: 'ls' });
     await req('POST', `/api/approvals/${a.id}`, { decision: 'allow' });
     expect(calls).toContainEqual(['decide', a.id, 'allow', undefined]);
     await req('POST', `/api/goals/${g.id}/worker`, { action: 'resume' });

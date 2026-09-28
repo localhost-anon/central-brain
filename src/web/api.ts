@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { desc, eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { failures } from '../db/schema.js';
+import { approvals as approvalsTable, failures } from '../db/schema.js';
 import type { Embedder } from '../services/embedder.js';
 import { listDecisions } from '../services/decisions.js';
 import { createGoal, getGoal, listGoals, listRequirements, openMaterialQuestions } from '../services/goals.js';
@@ -66,7 +66,7 @@ export function goalDetail(db: BrainDb, id: string) {
   const verifications = listVerifications(db, { goalId: id });
   const runs = listRuns(db, id);
   const events = runs[0] ? listEvents(db, runs[0].id, { limit: 200 }) : [];
-  const approvals = db.$client.prepare('SELECT * FROM approvals WHERE goal_id = ? ORDER BY id DESC').all(id);
+  const approvals = db.select().from(approvalsTable).where(eq(approvalsTable.goalId, id)).orderBy(desc(approvalsTable.id)).all();
   const t: { ts: string; kind: string; text: string }[] = [
     { ts: goal.createdAt, kind: 'goal', text: 'Goal created' },
     ...(goal.lockedAt ? [{ ts: goal.lockedAt, kind: 'goal', text: 'Contract locked' }] : []),

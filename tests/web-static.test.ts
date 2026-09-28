@@ -14,6 +14,9 @@ describe('static UI', () => {
       expect(js).toContain(route);
     }
     expect(js).toContain('function esc(');
+    expect(js).toContain('function hasDraft(');
+    expect(js).toContain('workerError');
+    expect(html.includes('id="stale"') || js.includes('id="stale"')).toBe(true);
   });
 
   it('brain ui is registered', () => {

@@ -119,6 +119,7 @@ async function renderNew() {
         title: document.getElementById('title').value, objective: document.getElementById('objective').value,
         projectId: document.getElementById('project').value || undefined, startWorker: document.getElementById('start').checked,
       });
+      if (out.workerError) flash(`Goal created, but the worker could not start: ${out.workerError}`);
       location.hash = `#/goal/${out.goal.id}`;
     } catch (err) { flash(err.message); e.target.disabled = false; }
   });
@@ -136,7 +137,7 @@ async function renderGoal(id) {
   const pending = d.approvals.filter(a => a.status === 'pending' && a.runId);
   view.innerHTML = `
     <section class="panel">
-      <h2>${esc(g.id)} · ${esc(g.title)}</h2>
+      <h2>${esc(g.id)} · ${esc(g.title)} <span id="stale" class="small muted" hidden>New activity — reload after sending</span></h2>
       <p>${esc(g.objective)}</p>
       <p><span class="badge ${esc(g.status)}">${esc(g.status)}</span>
         ${g.riskLevel ? `<span class="badge">risk ${esc(g.riskLevel)}</span>` : ''}
@@ -186,15 +187,29 @@ async function renderGoal(id) {
   }));
   const send = document.getElementById('send-answers');
   send?.addEventListener('click', async () => {
+    // Only cards not yet sent: a retry after a mid-batch failure never re-posts accepted answers.
+    const cards = [...view.querySelectorAll('[data-q]:not([data-sent])')]
+      .filter(card => card.querySelector('[data-answer]').value.trim());
+    if (!cards.length) { flash('Type an answer first, or dismiss the question.'); return; }
     send.disabled = true;
     try {
-      for (const card of view.querySelectorAll('[data-q]')) {
-        const answer = card.querySelector('[data-answer]').value.trim();
-        if (!answer) continue;
-        await api(`/api/questions/${card.dataset.q}/answer`, { answer, as: card.querySelector('[data-as]').value || undefined });
+      for (const card of cards) {
+        const box = card.querySelector('[data-answer]');
+        await api(`/api/questions/${card.dataset.q}/answer`, { answer: box.value.trim(), as: card.querySelector('[data-as]').value || undefined });
+        box.value = '';
+        box.disabled = true;
+        card.dataset.sent = '1';
+        const note = document.createElement('div');
+        note.className = 'small muted';
+        note.textContent = 'Sent';
+        card.append(note);
       }
       refresh();
-    } catch (e) { flash(e.message); send.disabled = false; }
+    } catch (e) {
+      flash(e.message);
+      const btn = document.getElementById('send-answers');
+      if (btn) btn.disabled = false;
+    }
   });
   bindNeeds();
 }
@@ -221,11 +236,26 @@ function refresh() {
   p.catch(e => { view.innerHTML = `<section class="panel"><h2>Error</h2><p>${esc(e.message)}</p><a href="#/">Back to goals</a></section>`; });
 }
 
+// True while the user has unsent input on the page — a reload would wipe it.
+function hasDraft() {
+  if (view.querySelector('input:focus, textarea:focus, select:focus')) return true;
+  return [...view.querySelectorAll('[data-answer], [data-note], [data-reason]')].some(el => el.value.trim() !== '');
+}
+
+function markStale() {
+  const stale = document.getElementById('stale');
+  if (stale) stale.hidden = false;
+}
+
 function scheduleReload() {
   if (current.page === 'new') return;              // never wipe a half-typed form
-  if (view.querySelector('textarea:focus, input:focus')) return;
+  if (hasDraft()) { markStale(); return; }
   clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(refresh, 300);
+  reloadTimer = setTimeout(() => {
+    if (current.page === 'new') return;
+    if (hasDraft()) { markStale(); return; }
+    refresh();
+  }, 300);
 }
 
 function connect() {
