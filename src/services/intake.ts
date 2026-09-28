@@ -17,6 +17,13 @@ export const GAP_QUESTIONS: Record<ContractGap['field'], string> = {
   risk_level: 'What is the risk level (LOW, MEDIUM, HIGH, IRREVERSIBLE)?',
 };
 
+/** Asked on every editable goal: sessions otherwise decide user-visible choices silently. */
+export const BEHAVIOUR_QUESTION =
+  'Which user-visible behaviour choices does this change involve (thresholds, defaults, limits, ' +
+  'data or history that disappears or changes, side effects on existing users)? Put each to the ' +
+  'user and record their decision here; answer "none" only if nothing a user would notice changes.';
+const BEHAVIOUR_CHECK_KEY = 'review:behaviour';
+
 const CONTEXT_TYPES = ['decision', 'failure', 'learning', 'knowledge', 'goal', 'observation'] as const;
 type ContextType = typeof CONTEXT_TYPES[number];
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
@@ -47,6 +54,7 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
     for (const field of Object.keys(GAP_QUESTIONS) as ContractGap['field'][]) {
       if (gapKeys.has(`missing:${field}`)) upsertBrainQuestion(db, goalId, `missing:${field}`, GAP_QUESTIONS[field]);
     }
+    upsertBrainQuestion(db, goalId, BEHAVIOUR_CHECK_KEY, BEHAVIOUR_QUESTION);
     for (const q of listQuestions(db, goalId, { open: true })) {
       if (q.source === 'brain' && q.checkKey?.startsWith('missing:') && !gapKeys.has(q.checkKey)) {
         answerQuestion(db, q.id, 'filled via contract');

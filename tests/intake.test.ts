@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createTestDb, makeLockable } from './helpers.js';
 import { fakeEmbedder, type Embedder } from '../src/services/embedder.js';
 import { reindexEmbeddings } from '../src/services/embedding-store.js';
-import { buildIntakeReport } from '../src/services/intake.js';
+import { buildIntakeReport, BEHAVIOUR_QUESTION } from '../src/services/intake.js';
 import { createGoal, addRequirement, lockGoal } from '../src/services/goals.js';
 import { listQuestions, answerQuestion, dismissQuestion } from '../src/services/questions.js';
 import { addDecision } from '../src/services/decisions.js';
@@ -17,10 +17,27 @@ describe('intake report', () => {
     expect(r1.ready).toBe(false);
     expect(r1.gaps.map(x => x.field).sort()).toEqual(['risk_level', 'scope', 'success_criterion']);
     expect(listQuestions(db, g.id).map(q => q.checkKey).sort())
-      .toEqual(['missing:risk_level', 'missing:scope', 'missing:success_criterion']);
-    expect(r1.nextAction).toMatch(/answer 3 material question/);
+      .toEqual(['missing:risk_level', 'missing:scope', 'missing:success_criterion', 'review:behaviour']);
+    expect(r1.nextAction).toMatch(/answer 4 material question/);
     await buildIntakeReport(db, fakeEmbedder(), g.id);
-    expect(listQuestions(db, g.id)).toHaveLength(3);
+    expect(listQuestions(db, g.id)).toHaveLength(4);
+  });
+
+  it('always asks the behaviour-choices question; it blocks lock until answered and is never duplicated', async () => {
+    const db = createTestDb();
+    const g = createGoal(db, { title: 't', objective: 'o' });
+    makeLockable(db, g.id); // no contract gaps at all
+    const r1 = await buildIntakeReport(db, fakeEmbedder(), g.id);
+    const q = listQuestions(db, g.id).find(x => x.checkKey === 'review:behaviour')!;
+    expect(q).toMatchObject({ source: 'brain', materiality: 'material', status: 'pending', question: BEHAVIOUR_QUESTION });
+    expect(r1.ready).toBe(false);
+    expect(r1.nextAction).toMatch(/answer 1 material question/);
+    expect(() => lockGoal(db, g.id)).toThrow(/open question/);
+    answerQuestion(db, q.id, 'User chose: finished = watched past 95%');
+    const r2 = await buildIntakeReport(db, fakeEmbedder(), g.id);
+    expect(r2.ready).toBe(true);
+    expect(listQuestions(db, g.id).filter(x => x.checkKey === 'review:behaviour')).toHaveLength(1);
+    expect(lockGoal(db, g.id).status).toBe('LOCKED');
   });
 
   it('answered or dismissed gap questions are never recreated (Review Focus 2)', async () => {
@@ -30,8 +47,9 @@ describe('intake report', () => {
     const qs = listQuestions(db, g.id);
     answerQuestion(db, qs.find(q => q.checkKey === 'missing:scope')!.id, 'auth service only', { as: 'scope' });
     dismissQuestion(db, qs.find(q => q.checkKey === 'missing:risk_level')!.id, 'will set via goal set');
+    dismissQuestion(db, qs.find(q => q.checkKey === 'review:behaviour')!.id, 'no user-visible behaviour change');
     await buildIntakeReport(db, fakeEmbedder(), g.id);
-    expect(listQuestions(db, g.id)).toHaveLength(3);
+    expect(listQuestions(db, g.id)).toHaveLength(4);
   });
 
   it('auto-answers gap questions once their field is filled; ready → "ready to lock"', async () => {
@@ -39,10 +57,13 @@ describe('intake report', () => {
     const g = createGoal(db, { title: 't', objective: 'o' });
     await buildIntakeReport(db, fakeEmbedder(), g.id);
     makeLockable(db, g.id);
+    const behaviour = listQuestions(db, g.id).find(q => q.checkKey === 'review:behaviour')!;
+    answerQuestion(db, behaviour.id, 'none — internal change');
     const r = await buildIntakeReport(db, fakeEmbedder(), g.id);
     expect(r.ready).toBe(true);
     expect(r.nextAction).toBe('ready to lock');
-    expect(listQuestions(db, g.id).every(q => q.status === 'answered' && q.answer === 'filled via contract')).toBe(true);
+    expect(listQuestions(db, g.id).filter(q => q.checkKey?.startsWith('missing:'))
+      .every(q => q.status === 'answered' && q.answer === 'filled via contract')).toBe(true);
   });
 
   it('finds exact and semantic duplicate requirements', async () => {

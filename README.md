@@ -14,5 +14,5 @@ Persistent goal-oriented memory for Claude Code. See ARCHITECTURE.md.
 - Resume: `brain goal resume GOAL-…` (contract, work state, next action)
 - Semantic: `brain embed reindex` (local ONNX, model cached in ~/.central-brain/models); all `search` commands are hybrid FTS+vector
 - Import: `brain import claude-mem` (idempotent; observations carry `claude-mem:<id>` refs)
-- Intake: `brain goal intake GOAL-…` (context, §9 gaps → questions, review items, duplicates); `brain goal question add|answer [--as type]|dismiss|list`; `brain goal set --risk`; `brain goal lock` refuses incomplete contracts (`--force --reason` records a decision)
+- Intake: `brain goal intake GOAL-…` (context, §9 gaps → questions, a standing `review:behaviour` question for user-visible choices, review items, duplicates); `brain goal question add|answer [--as type]|dismiss|list`; `brain goal set --risk`; `brain goal lock` refuses incomplete contracts (`--force --reason` records a decision)
 - Schema: sessions never auto-migrate the live DB; run `brain migrate` after pulling schema changes
