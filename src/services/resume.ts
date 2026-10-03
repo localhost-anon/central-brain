@@ -40,9 +40,9 @@ function recommend(
     case 'FAILED':
     case 'CANCELLED': return `Goal is ${goal.status}; nothing to resume`;
     default: {
-      if (converge && !converge.converged) return converge.nextAction;
-      if (converge?.converged) return `Converged — complete the goal (brain goal complete ${goal.id})`;
       if (ready.length > 0) return `Work on ${ready[0].id}: ${ready[0].title}`;
+      if (converge?.converged) return `Converged — complete the goal (brain goal complete ${goal.id})`;
+      if (converge) return converge.nextAction;
       if (pending.length === 0 && allPassed) return 'All criteria passed — complete the goal';
       if (pending.length === 0) return 'Verify remaining success criteria';
       return 'No ready work: resolve dependencies or blocked work units';

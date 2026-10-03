@@ -10,7 +10,10 @@ describe('resume + context integration', () => {
   it('resume embeds converge and recommends the top finding', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
-    makeLockable(db, g.id); lockGoal(db, g.id); makeStartable(db, g.id); startGoal(db, g.id);
+    makeLockable(db, g.id); lockGoal(db, g.id);
+    const wu = makeStartable(db, g.id); startGoal(db, g.id);
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/^Work on /);
+    updateWorkUnit(db, wu.id, { status: 'COMPLETED' });
     const r = resumeGoal(db, g.id);
     expect(r.converge?.converged).toBe(false);
     expect(r.nextRecommendedAction).toMatch(/^fix (CRITICAL|HIGH) /);
