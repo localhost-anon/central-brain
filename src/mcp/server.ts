@@ -22,6 +22,8 @@ import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
 import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
+import { convergeGoal } from '../services/converge.js';
+import * as principles from '../services/principles.js';
 
 export function buildServer(db: BrainDb): McpServer {
   const server = new McpServer({ name: 'central-brain', version: '0.1.0' });
@@ -53,20 +55,31 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_goal_list', 'List goals, optionally by status', { status: z.string().optional() },
     (a) => goals.listGoals(db, a));
   tool('brain_goal_current', 'Get the currently active goal', {}, () => goals.currentGoal(db) ?? null);
-  tool('brain_goal_lock', 'Lock the goal contract; refuses §9 gaps/open material questions unless force+reason', {
+  tool('brain_goal_lock', 'Lock the goal contract; refuses §9 gaps, open material questions, non-atomic success criteria, criteria without a verify method, and unacknowledged principles unless force+reason', {
     id: z.string(), force: z.boolean().optional(), reason: z.string().optional(),
   }, (a) => goals.lockGoal(db, a.id, { force: a.force, reason: a.reason }));
   tool('brain_goal_set', 'Set contract fields (risk, autonomy) on an unlocked goal', {
     id: z.string(), risk: z.enum(['LOW', 'MEDIUM', 'HIGH', 'IRREVERSIBLE']).optional(), autonomy: z.string().optional(),
   }, (a) => goals.setGoalFields(db, a.id, { riskLevel: a.risk, autonomyLevel: a.autonomy }));
-  tool('brain_goal_start', 'Start executing a locked goal', { id: z.string() },
+  tool('brain_goal_start', 'Start executing a locked goal (v1: every required criterion needs a serving work unit)', { id: z.string() },
     (a) => goals.startGoal(db, a.id));
+  tool('brain_goal_converge', 'Converge report: typed findings (missing/partial/contradicts/stale/unfinished/open failure) for a goal; read-only', {
+    id: z.string(),
+  }, (a) => convergeGoal(db, a.id));
+  tool('brain_goal_cancel', 'Cancel an open goal (reason required)', { id: z.string(), reason: z.string() },
+    (a) => goals.cancelGoal(db, a.id, a.reason));
+  tool('brain_goal_link_project', 'Link a goal to a project (its principles then apply)', {
+    goalId: z.string(), project: z.string(),
+  }, (a) => principles.linkGoalProject(db, a.goalId, a.project));
+  tool('brain_principle_ack', 'Acknowledge an applicable principle before lock: honoured (how) or exception (why; records a decision)', {
+    goalId: z.string(), knowledgeId: z.number(), mode: z.enum(['honoured', 'exception']), note: z.string(),
+  }, (a) => principles.ackPrinciple(db, a));
   tool('brain_goal_block', 'Mark a goal blocked with a reason', { id: z.string(), reason: z.string() },
     (a) => goals.blockGoal(db, a.id, a.reason));
-  tool('brain_goal_complete', 'Complete a goal (fails on unmet required success criteria)', {
+  tool('brain_goal_complete', 'Complete a goal; v1 goals must converge (no CRITICAL/HIGH findings). force needs reason', {
     id: z.string(), force: z.boolean().optional(), reason: z.string().optional(),
   }, (a) => goals.completeGoal(db, a.id, { force: a.force, reason: a.reason }));
-  tool('brain_requirement_add', 'Add a requirement to an unlocked goal', {
+  tool('brain_requirement_add', 'Add a requirement to an unlocked goal. Success criteria must be ONE claim each and carry verifyMethod; tag contract lines with coverage', {
     goalId: z.string(), description: z.string(),
     type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption', 'scope', 'permission'])
       .default('success_criterion'),
@@ -80,7 +93,7 @@ export function buildServer(db: BrainDb): McpServer {
   }, (a) => { goals.setRequirementStatus(db, a.id, a.status, a.reason); return { ok: true }; });
 
   // work
-  tool('brain_work_create', 'Create a work unit under a goal', {
+  tool('brain_work_create', 'Create a work unit; serves = requirement ids it delivers (every required criterion must be served before goal start)', {
     goalId: z.string(), title: z.string(), description: z.string().optional(),
     workType: z.string().optional(), priority: z.number().optional(),
     complexity: z.enum(['trivial', 'low', 'medium', 'high', 'critical']).optional(),
@@ -184,7 +197,7 @@ export function buildServer(db: BrainDb): McpServer {
     failureId: z.number(), solution: z.string(), successful: z.boolean().optional(),
     verdict: z.enum(['verified', 'partial', 'failed']).optional(), reproduction: z.string().optional(),
   }, (a) => fail.addSolution(db, a.failureId, a));
-  tool('brain_verification_record', 'Record a verification run; linked requirement moves to PASSED/FAILED (§35)', {
+  tool('brain_verification_record', 'Record evidence for a criterion. verdict verified needs actualResult and verificationType = the criterion verifyMethod; partial never counts as pass', {
     passed: z.boolean().optional(), verdict: z.enum(['verified', 'partial', 'failed']).optional(),
     goalId: z.string().optional(), workUnitId: z.string().optional(),
     requirementId: z.number().optional(), verificationType: z.string().optional(),
@@ -208,7 +221,7 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_goal_intake', 'Intake report: related context, §9 gaps (auto-questions), review items, duplicate requirements', {
     id: z.string(),
   }, (a) => buildIntakeReport(db, embedder(), a.id));
-  tool('brain_question_add', 'Add a clarification question to an unlocked goal (material unless detail)', {
+  tool('brain_question_add', 'Add a clarification question (max 5 material session questions per goal; give a recommended answer)', {
     goalId: z.string(), question: z.string(), detail: z.boolean().optional(), recommended: z.string().optional(),
   }, (a) => questions.addQuestion(db, a.goalId, { question: a.question, materiality: a.detail ? 'detail' : 'material', recommended: a.recommended }));
   tool('brain_question_answer', 'Answer a question; `as` also adds it as a contract line', {

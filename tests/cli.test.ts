@@ -134,3 +134,11 @@ describe('brain CLI end-to-end', () => {
     expect(JSON.parse(locked.contractSnapshot).answeredQuestions.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('brain CLI lifecycle commands', () => {
+  it('converges and cancels a goal', { timeout: 60000 }, () => {
+    const g = brain('goal', 'create', 'Converge me', '-o', 'obj');
+    expect(brain('goal', 'converge', g.id)).toHaveProperty('converged');
+    expect(brain('goal', 'cancel', g.id, 'duplicate').status).toBe('CANCELLED');
+  });
+});

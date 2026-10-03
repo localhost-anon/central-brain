@@ -20,6 +20,8 @@ import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
 import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
+import { convergeGoal } from '../services/converge.js';
+import * as principles from '../services/principles.js';
 
 function db(opts: { migrate?: boolean } = {}): BrainDb {
   const handle = openDb();
@@ -109,6 +111,14 @@ goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
 goal.command('complete <id>').option('--force').option('--reason <text>')
   .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force, reason: o.reason }))));
+goal.command('converge <id>').description('Converge report: findings blocking completion')
+  .action((id) => run(() => out(convergeGoal(db(), id))));
+goal.command('cancel <id> <reason>').action((id, reason) => run(() => out(goals.cancelGoal(db(), id, reason))));
+goal.command('link-project <goalId> <project>')
+  .action((goalId, project) => run(() => out(principles.linkGoalProject(db(), goalId, project))));
+const principle = program.command('principle');
+principle.command('ack <goalId> <knowledgeId> <mode> <note>')
+  .action((goalId, k, mode, note) => run(() => out(principles.ackPrinciple(db(), { goalId, knowledgeId: Number(k), mode, note }))));
 goal.command('resume <id>').description('Full resume state + next recommended action (§72)')
   .action((id) => run(() => out(resumeGoal(db(), id))));
 
