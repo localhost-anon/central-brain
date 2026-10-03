@@ -41,8 +41,10 @@ function recommend(
     case 'CANCELLED': return `Goal is ${goal.status}; nothing to resume`;
     default: {
       if (ready.length > 0) return `Work on ${ready[0].id}: ${ready[0].title}`;
-      if (converge?.converged) return `Converged — complete the goal (brain goal complete ${goal.id})`;
-      if (converge) return converge.nextAction;
+      // R6 order (converge drives the recommendation) is v1-only; v0 goals keep the legacy
+      // order and carry converge as information (they complete under the legacy rule).
+      if (goal.rulesVersion >= 1 && converge?.converged) return `Converged — complete the goal (brain goal complete ${goal.id})`;
+      if (goal.rulesVersion >= 1 && converge) return converge.nextAction;
       if (pending.length === 0 && allPassed) return 'All criteria passed — complete the goal';
       if (pending.length === 0) return 'Verify remaining success criteria';
       return 'No ready work: resolve dependencies or blocked work units';

@@ -6,7 +6,8 @@ import { loadEmbeddings } from './embedding-store.js';
 import {
   checkContract, getGoal, listRequirements, toReqRow, type ContractGap, type Goal, type GoalQuestion,
 } from './goals.js';
-import { uncoveredCategories } from './contract-rules.js';
+import { lockFindings, principleFindings, uncoveredCategories, type Finding } from './contract-rules.js';
+import { principleAckRows, principleRows } from './principle-rows.js';
 import { applicablePrinciples, goalProjectIds, listPrincipleAcks } from './principles.js';
 import { hybridSearch } from './hybrid-search.js';
 import { answerQuestion, listQuestions, refreshClarificationStatus, upsertBrainQuestion } from './questions.js';
@@ -46,6 +47,8 @@ export interface IntakeReport {
   reviewItems: { kind: 'overlapping_goal' | 'related_decision' | 'user_preference' | 'no_project_link'; ref: string; text: string; score: number }[];
   principles: { id: number; statement: string; ack: string | null }[];
   uncoveredCategories: string[];
+  /** v1 lock gate findings (non-atomic / no verify method / unacknowledged principle); [] once locked. */
+  lockBlockers: Finding[];
   duplicates: { a: number; b: number; reason: 'exact' | 'semantic' }[];
   semanticUnavailable: boolean;
   nextAction: string;
@@ -156,6 +159,13 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
   const principles = applicablePrinciples(db, goalId).map(p => ({ id: p.id, statement: p.statement, ack: acks.get(p.id) ?? null }));
   const unacked = principles.filter(p => p.ack === null).length;
 
+  // The same v1 findings lockGoal refuses on, so "ready" here means lockGoal will accept.
+  const lockBlockers = editable ? [
+    ...lockFindings(listRequirements(db, goalId).map(toReqRow)),
+    ...principleFindings(principleRows(db, goalId), principleAckRows(db, goalId), 'lock'),
+  ] : [];
+  const ready = check.ready && lockBlockers.length === 0;
+
   // 5. next action — first applicable
   let nextAction = 'ready to lock';
   if (check.openQuestions.length > 0) {
@@ -164,14 +174,24 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
     nextAction = `fill: ${check.gaps.map(g => g.field).join(', ')}`;
   } else if (duplicates.length > 0) {
     nextAction = `resolve ${duplicates.length} duplicate requirement pair(s)`;
+  } else if (lockBlockers.length > 0) {
+    const steps: string[] = [];
+    for (const b of lockBlockers) {
+      const n = b.ref.replace(/^req:/, '');
+      if (b.kind === 'non_atomic') steps.push(`split criterion #${n}`);
+      else if (b.kind === 'no_verify_method') steps.push(`add verify method to #${n}`);
+    }
+    const unackedBlockers = lockBlockers.filter(b => b.kind === 'unacknowledged_principle').length;
+    if (unackedBlockers > 0) steps.push(`acknowledge ${unackedBlockers} principle(s) (principle ack)`);
+    nextAction = steps.join('; ');
   } else if (unacked > 0) {
     nextAction = `acknowledge ${unacked} principle(s) (principle ack)`;
   }
 
   return {
-    goal: getGoal(db, goalId), ready: check.ready,
+    goal: getGoal(db, goalId), ready,
     gaps: check.gaps, openQuestions: check.openQuestions, context, reviewItems, duplicates,
-    principles, uncoveredCategories: uncoveredNow,
+    principles, uncoveredCategories: uncoveredNow, lockBlockers,
     semanticUnavailable, nextAction,
   };
 }

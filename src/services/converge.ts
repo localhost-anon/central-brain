@@ -29,7 +29,9 @@ export function convergeGoal(db: BrainDb, goalId: string): ConvergeReport {
 
   const findings = sortFindings([
     ...evidenceFindings(reqs, runs, units, open),
-    ...coverageFindings(reqs, units, links).filter(f => f.kind === 'unrequested'),
+    // v1 (R8): a required criterion no work unit serves blocks completion, even from LOCKED.
+    ...coverageFindings(reqs, units, links)
+      .filter(f => f.kind === 'unrequested' || (goal.rulesVersion >= 1 && f.kind === 'uncovered')),
     ...principleFindings(principleRows(db, goalId), principleAckRows(db, goalId), 'converge'),
   ]);
   const criteria = reqs.filter(r => r.requirementType === 'success_criterion').map(r => {

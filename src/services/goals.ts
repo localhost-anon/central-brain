@@ -293,6 +293,10 @@ export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean; r
     });
     return setStatus(db, id, 'COMPLETED', { completedAt: now(), completionMode: 'forced', convergeSnapshot: snapshot });
   }
+  // R7: an unlocked contract was never gated (no criteria/verify-method/principle checks).
+  if (!g.lockedAt) {
+    throw new IncompleteCriteriaError(`Goal ${id} was never locked; lock its contract first (or force with a reason)`);
+  }
   if (g.rulesVersion >= 1) {
     const blocking = report.findings.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH');
     if (blocking.length > 0) {
