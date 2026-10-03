@@ -247,10 +247,11 @@ failCmd.command('search <query>').option('-n, --limit <n>')
     types: ['failure'], limit: o.limit ? Number(o.limit) : undefined,
   }))));
 failCmd.command('show <id>').action((id) => run(() => out(fail.getFailure(db(), Number(id)))));
-failCmd.command('resolve <id>').action((id) => run(() => out(fail.resolveFailure(db(), Number(id)))));
+failCmd.command('resolve <id> <reason>').action((id, reason) => run(() => out(fail.resolveFailure(db(), Number(id), reason))));
 failCmd.command('solution <failureId> <solution>').option('--successful')
+  .option('--verdict <verdict>', 'verified|partial|failed').option('--reproduction <text>', 'how the original symptom was re-checked')
   .action((failureId, solution, o) => run(() => out(fail.addSolution(db(), Number(failureId), {
-    solution, successful: o.successful,
+    solution, successful: o.successful, verdict: o.verdict, reproduction: o.reproduction,
   }))));
 
 // ---- verification ----

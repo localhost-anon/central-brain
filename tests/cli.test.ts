@@ -74,7 +74,7 @@ describe('brain CLI end-to-end', () => {
     // failure loop
     const g = brain('goal', 'create', 'Phase2 e2e goal');
     const f = brain('failure', 'add', 'ETIMEDOUT calling qdrant', '-g', g.id, '--type', 'network');
-    brain('failure', 'solution', String(f.id), 'increase timeout to 30s', '--successful');
+    brain('failure', 'solution', String(f.id), 'increase timeout to 30s', '--successful', '--reproduction', 'rechecked qdrant call; no timeout');
     expect(brain('failure', 'show', String(f.id)).resolved).toBe(1);
     expect(brain('failure', 'search', 'etimedout').length).toBe(1);
 

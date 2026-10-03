@@ -178,10 +178,11 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_failure_search', 'Have I seen this error before? Hybrid (FTS + semantic) search over failures (§66)', {
     query: z.string(), limit: z.number().optional(),
   }, (a) => hybridSearch(db, embedder(), a.query, { types: ['failure' as SearchType], limit: a.limit }));
-  tool('brain_failure_resolve', 'Mark a failure resolved', { id: z.number() },
-    (a) => fail.resolveFailure(db, a.id));
-  tool('brain_failure_solution_add', 'Attach a solution to a failure; successful:true also resolves it', {
+  tool('brain_failure_resolve', 'Mark a failure resolved directly; requires a reason (stored + observation). Prefer brain_failure_solution_add with verdict verified + reproduction.', { id: z.number(), reason: z.string() },
+    (a) => fail.resolveFailure(db, a.id, a.reason));
+  tool('brain_failure_solution_add', 'Attach a solution to a failure. Resolves it only with verdict verified plus a non-empty reproduction (how the original symptom was re-checked); passing tests alone are partial. Legacy successful:true without reproduction is stored partial and does not resolve.', {
     failureId: z.number(), solution: z.string(), successful: z.boolean().optional(),
+    verdict: z.enum(['verified', 'partial', 'failed']).optional(), reproduction: z.string().optional(),
   }, (a) => fail.addSolution(db, a.failureId, a));
   tool('brain_verification_record', 'Record a verification run; linked requirement moves to PASSED/FAILED (§35)', {
     passed: z.boolean().optional(), verdict: z.enum(['verified', 'partial', 'failed']).optional(),

@@ -16,7 +16,7 @@ describe('failures service', () => {
   it('a successful solution resolves the failure', () => {
     const db = createTestDb();
     const f = addFailure(db, { errorMessage: 'migration failed: duplicate column' });
-    addSolution(db, f.id, { solution: 'Drop the partial migration table and re-run', successful: true });
+    addSolution(db, f.id, { solution: 'Drop the partial migration table and re-run', successful: true, reproduction: 'reran migration; no duplicate column' });
     const full = getFailure(db, f.id);
     expect(full.resolved).toBe(1);
     expect(full.resolvedAt).toBeTruthy();
@@ -33,7 +33,7 @@ describe('failures service', () => {
   it('resolveFailure works directly and getFailure throws on missing id', () => {
     const db = createTestDb();
     const f = addFailure(db, { errorMessage: 'x' });
-    expect(resolveFailure(db, f.id).resolved).toBe(1);
+    expect(resolveFailure(db, f.id, 'obsolete').resolved).toBe(1);
     expect(() => getFailure(db, 999)).toThrow(/not found/i);
   });
 });
