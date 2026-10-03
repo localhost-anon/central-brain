@@ -112,15 +112,15 @@ describe('brain CLI end-to-end', () => {
     const g = brain('goal', 'create', 'Add SSO', '-o', 'Users sign in with Microsoft');
     const r1 = brain('goal', 'intake', g.id);
     expect(r1.ready).toBe(false);
-    expect(r1.openQuestions).toHaveLength(4);
+    expect(r1.openQuestions).toHaveLength(5);
     expect(() => brain('goal', 'lock', g.id)).toThrow();
     const qs = brain('goal', 'question', 'list', g.id, '--open');
     const byKey = (k: string) => qs.find((q: any) => q.checkKey === k).id;
     brain('goal', 'question', 'answer', String(byKey('missing:scope')), 'auth service and login UI', '--as', 'scope');
-    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end');
-    brain('goal', 'requirement', 'add', g.id, 'Microsoft login works end to end', '--verify', 'test');
+    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end', '--as', 'success_criterion', '--verify', 'test');
     brain('goal', 'question', 'answer', String(byKey('missing:risk_level')), 'HIGH');
     brain('goal', 'question', 'answer', String(byKey('review:behaviour')), 'User chose: existing password users are migrated on next login', '--as', 'constraint');
+    brain('goal', 'question', 'answer', String(byKey('review:coverage')), 'n/a: all categories — e2e test');
     brain('goal', 'set', g.id, '--risk', 'HIGH');
     const extra = brain('goal', 'question', 'add', g.id, 'Keep password login?');
     brain('goal', 'question', 'dismiss', String(extra.id), 'covered by existing policy');

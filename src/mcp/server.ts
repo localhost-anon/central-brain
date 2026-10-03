@@ -207,12 +207,14 @@ export function buildServer(db: BrainDb): McpServer {
     id: z.string(),
   }, (a) => buildIntakeReport(db, embedder(), a.id));
   tool('brain_question_add', 'Add a clarification question to an unlocked goal (material unless detail)', {
-    goalId: z.string(), question: z.string(), detail: z.boolean().optional(),
-  }, (a) => questions.addQuestion(db, a.goalId, { question: a.question, materiality: a.detail ? 'detail' : 'material' }));
+    goalId: z.string(), question: z.string(), detail: z.boolean().optional(), recommended: z.string().optional(),
+  }, (a) => questions.addQuestion(db, a.goalId, { question: a.question, materiality: a.detail ? 'detail' : 'material', recommended: a.recommended }));
   tool('brain_question_answer', 'Answer a question; `as` also adds it as a contract line', {
     id: z.number(), answer: z.string(),
     as: z.enum(['constraint', 'exclusion', 'assumption', 'scope', 'permission', 'success_criterion']).optional(),
-  }, (a) => questions.answerQuestion(db, a.id, a.answer, { as: a.as }));
+    verifyMethod: z.enum(['test', 'command', 'api', 'inspection', 'manual']).optional(),
+    coverage: z.enum(['behaviour', 'data', 'failure_modes', 'edge_cases', 'non_functional', 'integration', 'completion']).optional(),
+  }, (a) => questions.answerQuestion(db, a.id, a.answer, { as: a.as, verifyMethod: a.verifyMethod, coverage: a.coverage }));
   tool('brain_question_dismiss', 'Dismiss a question as not material (reason required)', {
     id: z.number(), reason: z.string(),
   }, (a) => questions.dismissQuestion(db, a.id, a.reason));

@@ -4,8 +4,10 @@ import { knowledge } from '../db/schema.js';
 import { cosine, fromBlob, type Embedder } from './embedder.js';
 import { loadEmbeddings } from './embedding-store.js';
 import {
-  checkContract, getGoal, listRequirements, type ContractGap, type Goal, type GoalQuestion,
+  checkContract, getGoal, listRequirements, toReqRow, type ContractGap, type Goal, type GoalQuestion,
 } from './goals.js';
+import { uncoveredCategories } from './contract-rules.js';
+import { applicablePrinciples, goalProjectIds, listPrincipleAcks } from './principles.js';
 import { hybridSearch } from './hybrid-search.js';
 import { answerQuestion, listQuestions, refreshClarificationStatus, upsertBrainQuestion } from './questions.js';
 import { search, type SearchResult, type SearchType } from './search.js';
@@ -23,6 +25,11 @@ export const BEHAVIOUR_QUESTION =
   'data or history that disappears or changes, side effects on existing users)? Put each to the ' +
   'user and record their decision here; answer "none" only if nothing a user would notice changes.';
 const BEHAVIOUR_CHECK_KEY = 'review:behaviour';
+const COVERAGE_CHECK_KEY = 'review:coverage';
+const coverageQuestion = (cats: string[]) =>
+  `Which of these areas does the contract still need to address: ${cats.join(', ')}? ` +
+  'Add a contract line tagged with the category (requirement add --coverage <cat>) or answer ' +
+  '"n/a: <category> — <reason>" for each.';
 
 const CONTEXT_TYPES = ['decision', 'failure', 'learning', 'knowledge', 'goal', 'observation'] as const;
 type ContextType = typeof CONTEXT_TYPES[number];
@@ -36,7 +43,9 @@ export interface IntakeReport {
   gaps: ContractGap[];
   openQuestions: GoalQuestion[];
   context: Record<ContextType, SearchResult[]>;
-  reviewItems: { kind: 'overlapping_goal' | 'related_decision' | 'user_preference'; ref: string; text: string; score: number }[];
+  reviewItems: { kind: 'overlapping_goal' | 'related_decision' | 'user_preference' | 'no_project_link'; ref: string; text: string; score: number }[];
+  principles: { id: number; statement: string; ack: string | null }[];
+  uncoveredCategories: string[];
   duplicates: { a: number; b: number; reason: 'exact' | 'semantic' }[];
   semanticUnavailable: boolean;
   nextAction: string;
@@ -55,6 +64,8 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
       if (gapKeys.has(`missing:${field}`)) upsertBrainQuestion(db, goalId, `missing:${field}`, GAP_QUESTIONS[field]);
     }
     upsertBrainQuestion(db, goalId, BEHAVIOUR_CHECK_KEY, BEHAVIOUR_QUESTION);
+    const uncovered = uncoveredCategories(listRequirements(db, goalId).map(toReqRow));
+    if (uncovered.length > 0) upsertBrainQuestion(db, goalId, COVERAGE_CHECK_KEY, coverageQuestion(uncovered));
     for (const q of listQuestions(db, goalId, { open: true })) {
       if (q.source === 'brain' && q.checkKey?.startsWith('missing:') && !gapKeys.has(q.checkKey)) {
         answerQuestion(db, q.id, 'filled via contract');
@@ -134,6 +145,13 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
     }
   }
 
+  if (goalProjectIds(db, goalId).length === 0) {
+    reviewItems.push({ kind: 'no_project_link', ref: `goal:${goalId}`, text: 'No project linked — only GLOBAL principles are checked (goal link-project)', score: 0 });
+  }
+  const acks = new Map(listPrincipleAcks(db, goalId).map(a => [a.knowledgeId, a.mode]));
+  const principles = applicablePrinciples(db, goalId).map(p => ({ id: p.id, statement: p.statement, ack: acks.get(p.id) ?? null }));
+  const unacked = principles.filter(p => p.ack === null).length;
+
   // 5. next action — first applicable
   let nextAction = 'ready to lock';
   if (check.openQuestions.length > 0) {
@@ -142,11 +160,14 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
     nextAction = `fill: ${check.gaps.map(g => g.field).join(', ')}`;
   } else if (duplicates.length > 0) {
     nextAction = `resolve ${duplicates.length} duplicate requirement pair(s)`;
+  } else if (unacked > 0) {
+    nextAction = `acknowledge ${unacked} principle(s) (principle ack)`;
   }
 
   return {
     goal: getGoal(db, goalId), ready: check.ready,
     gaps: check.gaps, openQuestions: check.openQuestions, context, reviewItems, duplicates,
+    principles, uncoveredCategories: uncoveredCategories(listRequirements(db, goalId).map(toReqRow)),
     semanticUnavailable, nextAction,
   };
 }

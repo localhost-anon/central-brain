@@ -92,12 +92,15 @@ goal.command('intake <id>').description('Intake report: context, gaps, review it
 
 const question = goal.command('question');
 question.command('add <goalId> <text>').option('--detail', 'record only; never blocks lock')
+  .option('--recommended <answer>', 'recommended answer to offer the user')
   .action((goalId, text, o) => run(() => out(questions.addQuestion(db(), goalId, {
-    question: text, materiality: o.detail ? 'detail' : 'material',
+    question: text, materiality: o.detail ? 'detail' : 'material', recommended: o.recommended,
   }))));
 question.command('answer <id> <answer>')
   .option('--as <type>', 'constraint|exclusion|assumption|scope|permission|success_criterion')
-  .action((id, answer, o) => run(() => out(questions.answerQuestion(db(), Number(id), answer, { as: o.as }))));
+  .option('--verify <method>', 'test|command|api|inspection|manual (with --as)')
+  .option('--coverage <category>', 'behaviour|data|failure_modes|edge_cases|non_functional|integration|completion (with --as)')
+  .action((id, answer, o) => run(() => out(questions.answerQuestion(db(), Number(id), answer, { as: o.as, verifyMethod: o.verify, coverage: o.coverage }))));
 question.command('dismiss <id> <reason>')
   .action((id, reason) => run(() => out(questions.dismissQuestion(db(), Number(id), reason))));
 question.command('list <goalId>').option('--open', 'pending only')
