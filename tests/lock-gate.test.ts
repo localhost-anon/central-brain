@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb, makeLockable } from './helpers.js';
-import { createGoal, addRequirement, lockGoal, getGoal, setGoalFields, ContractIncompleteError } from '../src/services/goals.js';
+import { createGoal, addRequirement, lockGoal, getGoal, setGoalFields, ContractIncompleteError, GoalLockedError } from '../src/services/goals.js';
 import { addProject } from '../src/services/projects.js';
 import { addKnowledge } from '../src/services/knowledge.js';
 import { knowledge } from '../src/db/schema.js';
@@ -9,6 +9,7 @@ import {
   linkGoalProject, applicablePrinciples, ackPrinciple, listPrincipleAcks, goalProjectIds,
 } from '../src/services/principles.js';
 import { principleRows } from '../src/services/principle-rows.js';
+import { listDecisions } from '../src/services/decisions.js';
 import type { BrainDb } from '../src/db/connection.js';
 
 function draft(db: BrainDb, criterion: string, verifyMethod?: string) {
@@ -78,5 +79,41 @@ describe('v1 lock gate', () => {
     makeLockable(db, g.id);
     expect(lockGoal(db, g.id).status).toBe('LOCKED');
     expect(getGoal(db, g.id).rulesVersion).toBe(1);
+  });
+
+  it('ack rejects a non-applicable principle', () => {
+    const db = createTestDb();
+    const k = addKnowledge(db, { statement: 'x', category: 'principle', scopeType: 'PROJECT', scopeId: 'project:elsewhere' });
+    const g = draft(db, 'y', 'test');
+    expect(() => ackPrinciple(db, { goalId: g.id, knowledgeId: k.id, mode: 'honoured', note: 'n' })).toThrow(/not applicable/);
+  });
+
+  it('force-lock with reason bypasses a blob criterion and records a decision', () => {
+    const db = createTestDb();
+    const g = draft(db, '(1) a (2) b', 'test');
+    expect(lockGoal(db, g.id, { force: true, reason: 'spike' }).rulesVersion).toBe(1);
+    expect(listDecisions(db, { goalId: g.id })[0]!.reason).toContain('several claims');
+  });
+
+  it('exception ack creates one decision, stored in decisionId, reused on re-ack', () => {
+    const db = createTestDb();
+    const k = addKnowledge(db, { statement: 'Rule R', category: 'principle', scopeType: 'GLOBAL' });
+    const g = draft(db, 'y', 'test');
+    const a1 = ackPrinciple(db, { goalId: g.id, knowledgeId: k.id, mode: 'exception', note: 'because' });
+    const ds = listDecisions(db, { goalId: g.id }).filter(d => d.decision.includes('Principle exception'));
+    expect(ds).toHaveLength(1);
+    expect(a1.decisionId).toBe(ds[0]!.id);
+    const a2 = ackPrinciple(db, { goalId: g.id, knowledgeId: k.id, mode: 'exception', note: 'still because' });
+    expect(a2.decisionId).toBe(a1.decisionId);
+    expect(listDecisions(db, { goalId: g.id }).filter(d => d.decision.includes('Principle exception'))).toHaveLength(1);
+  });
+
+  it('ack on a locked goal is refused', () => {
+    const db = createTestDb();
+    const k = addKnowledge(db, { statement: 'Rule R', category: 'principle', scopeType: 'GLOBAL' });
+    const g = draft(db, 'y', 'test');
+    ackPrinciple(db, { goalId: g.id, knowledgeId: k.id, mode: 'honoured', note: 'ok' });
+    lockGoal(db, g.id);
+    expect(() => ackPrinciple(db, { goalId: g.id, knowledgeId: k.id, mode: 'exception', note: 'downgrade' })).toThrow(GoalLockedError);
   });
 });
