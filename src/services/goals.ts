@@ -4,7 +4,7 @@ import { goals, goalRequirements, goalQuestions, observations } from '../db/sche
 import { nextGoalId } from '../ids.js';
 import { addDecision } from './decisions.js';
 import { isStale } from './activity.js';
-import { COVERAGE_CATEGORIES, lockFindings, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
+import { COVERAGE_CATEGORIES, lockFindings, uncoveredCategories, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
 import { principleAckRows, principleRows } from './principle-rows.js';
 
 export type Goal = typeof goals.$inferSelect;
@@ -105,9 +105,14 @@ function contractGaps(db: BrainDb, goalId: string): ContractGap[] {
   return gaps;
 }
 
-function isFilledGapQuestion(q: GoalQuestion, gaps: ContractGap[]): boolean {
+function isFilledGapQuestion(q: GoalQuestion, gaps: ContractGap[], coverageDone = false): boolean {
+  if (coverageDone && q.source === 'brain' && q.checkKey === 'review:coverage') return true;
   if (q.source !== 'brain' || !q.checkKey?.startsWith('missing:')) return false;
   return !gaps.some(x => `missing:${x.field}` === q.checkKey);
+}
+
+function coverageComplete(db: BrainDb, goalId: string): boolean {
+  return uncoveredCategories(listRequirements(db, goalId).map(toReqRow)).length === 0;
 }
 
 function pendingMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
@@ -123,7 +128,8 @@ function pendingMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
  */
 export function openMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
   const gaps = contractGaps(db, goalId);
-  return pendingMaterialQuestions(db, goalId).filter(q => !isFilledGapQuestion(q, gaps));
+  const coverageDone = coverageComplete(db, goalId);
+  return pendingMaterialQuestions(db, goalId).filter(q => !isFilledGapQuestion(q, gaps, coverageDone));
 }
 
 export function checkContract(db: BrainDb, goalId: string): ContractCheck {
@@ -213,12 +219,13 @@ export function lockGoal(db: BrainDb, id: string, opts: { force?: boolean; reaso
   }
   // Brain gap questions whose field is filled are answered before freezing (same as intake),
   // so a locked goal with no real open questions ends with clarificationStatus 'complete'.
-  const filledGapQuestions = pendingMaterialQuestions(db, id).filter(q => isFilledGapQuestion(q, check.gaps));
+  const coverageDone = coverageComplete(db, id);
+  const filledGapQuestions = pendingMaterialQuestions(db, id).filter(q => isFilledGapQuestion(q, check.gaps, coverageDone));
   // better-sqlite3 transactions are connection-scoped, so addDecision(db, …) joins this transaction.
   db.transaction((tx) => {
     const ts = now();
     for (const q of filledGapQuestions) {
-      tx.update(goalQuestions).set({ answer: 'filled via contract', status: 'answered', answeredAt: ts })
+      tx.update(goalQuestions).set({ answer: q.checkKey === 'review:coverage' ? 'covered via contract' : 'filled via contract', status: 'answered', answeredAt: ts })
         .where(eq(goalQuestions.id, q.id)).run();
     }
     if (!ready) {

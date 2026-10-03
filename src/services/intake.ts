@@ -57,6 +57,7 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
   const goal = getGoal(db, goalId);
   const editable = !goal.lockedAt && !TERMINAL.includes(goal.status);
 
+  const uncoveredNow = uncoveredCategories(listRequirements(db, goalId).map(toReqRow));
   // 1. deterministic gap questions (never on locked/terminal goals)
   if (editable) {
     const gapKeys = new Set(checkContract(db, goalId).gaps.map(g => `missing:${g.field}`));
@@ -64,8 +65,11 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
       if (gapKeys.has(`missing:${field}`)) upsertBrainQuestion(db, goalId, `missing:${field}`, GAP_QUESTIONS[field]);
     }
     upsertBrainQuestion(db, goalId, BEHAVIOUR_CHECK_KEY, BEHAVIOUR_QUESTION);
-    const uncovered = uncoveredCategories(listRequirements(db, goalId).map(toReqRow));
-    if (uncovered.length > 0) upsertBrainQuestion(db, goalId, COVERAGE_CHECK_KEY, coverageQuestion(uncovered));
+    if (uncoveredNow.length > 0) upsertBrainQuestion(db, goalId, COVERAGE_CHECK_KEY, coverageQuestion(uncoveredNow));
+    else {
+      const pend = listQuestions(db, goalId, { open: true }).find(q => q.source === 'brain' && q.checkKey === COVERAGE_CHECK_KEY);
+      if (pend) answerQuestion(db, pend.id, 'covered via contract');
+    }
     for (const q of listQuestions(db, goalId, { open: true })) {
       if (q.source === 'brain' && q.checkKey?.startsWith('missing:') && !gapKeys.has(q.checkKey)) {
         answerQuestion(db, q.id, 'filled via contract');
@@ -167,7 +171,7 @@ export async function buildIntakeReport(db: BrainDb, embedder: Embedder, goalId:
   return {
     goal: getGoal(db, goalId), ready: check.ready,
     gaps: check.gaps, openQuestions: check.openQuestions, context, reviewItems, duplicates,
-    principles, uncoveredCategories: uncoveredCategories(listRequirements(db, goalId).map(toReqRow)),
+    principles, uncoveredCategories: uncoveredNow,
     semanticUnavailable, nextAction,
   };
 }

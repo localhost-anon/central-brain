@@ -46,7 +46,7 @@ export function addQuestion(
       eq(goalQuestions.goalId, goalId), eq(goalQuestions.materiality, 'material'), eq(goalQuestions.source, 'session'),
     )).all().length;
     if (existing >= MAX_SESSION_QUESTIONS) {
-      throw new Error(`A goal may ask at most ${MAX_SESSION_QUESTIONS} material questions; prioritise by impact x uncertainty and record the rest as assumptions.`);
+      throw new Error(`A goal may ask at most ${MAX_SESSION_QUESTIONS} material questions (answered and dismissed ones count toward the limit); prioritise by impact x uncertainty and record the rest as assumptions.`);
     }
   }
   const res = db.insert(goalQuestions).values({
