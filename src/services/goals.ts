@@ -3,6 +3,7 @@ import type { BrainDb } from '../db/connection.js';
 import { goals, goalRequirements, goalQuestions, observations } from '../db/schema.js';
 import { nextGoalId } from '../ids.js';
 import { addDecision } from './decisions.js';
+import { isStale } from './activity.js';
 
 export type Goal = typeof goals.$inferSelect;
 export type Requirement = typeof goalRequirements.$inferSelect;
@@ -57,11 +58,27 @@ export function listGoals(db: BrainDb, opts: { status?: string } = {}): Goal[] {
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function currentGoal(db: BrainDb): Goal | undefined {
+export function currentGoal(db: BrainDb, opts: { now?: Date } = {}): Goal | undefined {
   return db.select().from(goals)
     .where(inArray(goals.status, ACTIVE_STATUSES))
     .orderBy(desc(goals.updatedAt))
-    .get();
+    .all()
+    .find(g => !isStale(g, opts.now));
+}
+
+export function staleGoals(db: BrainDb, at: Date = new Date()): Goal[] {
+  return listGoals(db).filter(g => isStale(g, at));
+}
+
+export function cancelGoal(db: BrainDb, id: string, reason: string): Goal {
+  const g = getGoal(db, id);
+  if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot cancel.`);
+  if (!reason?.trim()) throw new Error('Cancelling a goal requires a reason.');
+  db.insert(observations).values({
+    goalId: id, scopeType: 'GOAL', scopeId: `goal:${id}`,
+    observation: `Goal cancelled: ${reason.trim()}`, createdAt: now(),
+  }).run();
+  return setStatus(db, id, 'CANCELLED');
 }
 
 export function listRequirements(db: BrainDb, goalId: string): Requirement[] {

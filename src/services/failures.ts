@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { failures, failureSolutions } from '../db/schema.js';
 import { search, type SearchResult } from './search.js';
+import { touchGoal } from './activity.js';
 
 export type Failure = typeof failures.$inferSelect;
 export type FailureSolution = typeof failureSolutions.$inferSelect;
@@ -17,6 +18,7 @@ export function addFailure(db: BrainDb, input: {
     workUnitId: input.workUnitId ?? null, failureType: input.failureType ?? null,
     context: input.context ?? null, createdAt: now(),
   }).run();
+  touchGoal(db, input.goalId);
   return db.select().from(failures).where(eq(failures.id, Number(res.lastInsertRowid))).get()!;
 }
 
@@ -47,6 +49,7 @@ export function addSolution(db: BrainDb, failureId: number, input: {
     successful: input.successful === undefined ? null : input.successful ? 1 : 0,
     createdAt: now(),
   }).run();
+  touchGoal(db, getFailure(db, failureId).goalId);
   if (input.successful) resolveFailure(db, failureId);
   return db.select().from(failureSolutions)
     .where(eq(failureSolutions.id, Number(res.lastInsertRowid))).get()!;

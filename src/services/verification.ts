@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { verificationRuns, goalRequirements } from '../db/schema.js';
 import { listRequirements, setRequirementStatus, type Requirement } from './goals.js';
+import { touchGoal } from './activity.js';
 
 export type VerificationRun = typeof verificationRuns.$inferSelect;
 
@@ -26,6 +27,7 @@ export function recordVerification(db: BrainDb, input: {
     expectedResult: input.expectedResult ?? null, actualResult: input.actualResult ?? null,
     createdAt: now(),
   }).run();
+  touchGoal(db, input.goalId);
   if (input.requirementId !== undefined) {
     setRequirementStatus(db, input.requirementId, input.passed ? 'PASSED' : 'FAILED');
   }

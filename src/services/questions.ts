@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { goalQuestions, goals } from '../db/schema.js';
 import { addRequirement, getGoal, GoalLockedError, openMaterialQuestions, type GoalQuestion } from './goals.js';
+import { touchGoal } from './activity.js';
 
 export const ANSWER_AS_TYPES = ['constraint', 'exclusion', 'assumption', 'scope', 'permission', 'success_criterion'];
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
@@ -41,6 +42,7 @@ export function addQuestion(
     goalId, question: input.question.trim(), materiality: input.materiality ?? 'material',
     source: input.source ?? 'session', checkKey: input.checkKey ?? null, createdAt: now(),
   }).run();
+  touchGoal(db, goalId);
   refreshClarificationStatus(db, goalId);
   return getQuestion(db, Number(res.lastInsertRowid));
 }
@@ -62,6 +64,7 @@ export function answerQuestion(db: BrainDb, id: number, answer: string, opts: { 
     db.update(goalQuestions).set({
       answer: answer.trim(), status: 'answered', answeredAt: now(), requirementId,
     }).where(eq(goalQuestions.id, id)).run();
+    touchGoal(db, q.goalId);
     refreshClarificationStatus(db, q.goalId);
   });
   return getQuestion(db, id);
@@ -74,6 +77,7 @@ export function dismissQuestion(db: BrainDb, id: number, reason: string): GoalQu
   if (!reason.trim()) throw new Error('Dismissing a question requires a reason.');
   db.update(goalQuestions).set({ status: 'dismissed', statusReason: reason.trim() })
     .where(eq(goalQuestions.id, id)).run();
+  touchGoal(db, q.goalId);
   refreshClarificationStatus(db, q.goalId);
   return getQuestion(db, id);
 }

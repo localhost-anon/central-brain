@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
 import { decisions, observations, approvals } from '../db/schema.js';
 import { parsePrefixedId } from '../ids.js';
+import { touchGoal } from './activity.js';
 
 export type Decision = typeof decisions.$inferSelect;
 export type Observation = typeof observations.$inferSelect;
@@ -24,6 +25,7 @@ export function addDecision(db: BrainDb, input: {
     reversible: input.reversible === false ? 0 : 1,
     executor: input.executor ?? null, createdAt: now(),
   }).run();
+  touchGoal(db, input.goalId);
   return db.select().from(decisions).where(eq(decisions.id, Number(res.lastInsertRowid))).get()!;
 }
 
@@ -42,6 +44,7 @@ export function addObservation(db: BrainDb, input: {
     workUnitId: input.workUnitId ?? null, scopeType: input.scopeType ?? null,
     scopeId: input.scopeId ?? null, confidence: input.confidence ?? 1, createdAt: now(),
   }).run();
+  touchGoal(db, input.goalId);
   return db.select().from(observations).where(eq(observations.id, Number(res.lastInsertRowid))).get()!;
 }
 

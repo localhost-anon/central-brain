@@ -3,6 +3,7 @@ import type { BrainDb } from '../db/connection.js';
 import { workUnits, workUnitDependencies } from '../db/schema.js';
 import { workUnitIdFor } from '../ids.js';
 import { getGoal } from './goals.js';
+import { touchGoal } from './activity.js';
 
 export type WorkUnit = typeof workUnits.$inferSelect;
 
@@ -24,6 +25,7 @@ export function createWorkUnit(db: BrainDb, input: {
   for (const dep of input.dependsOn ?? []) {
     db.insert(workUnitDependencies).values({ workUnitId: id, dependsOn: dep }).run();
   }
+  touchGoal(db, input.goalId);
   return getWorkUnit(db, id);
 }
 
@@ -51,6 +53,7 @@ export function updateWorkUnit(db: BrainDb, id: string, patch: {
   }
   if (patch.status === 'COMPLETED') set.completedAt = now();
   db.update(workUnits).set(set).where(eq(workUnits.id, id)).run();
+  touchGoal(db, wu.goalId);
   return getWorkUnit(db, id);
 }
 

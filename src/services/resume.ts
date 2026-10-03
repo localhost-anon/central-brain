@@ -6,6 +6,7 @@ import { listDecisions, type Decision } from './decisions.js';
 import { listWorkUnits, readyWorkUnits, type WorkUnit } from './work.js';
 import { goalVerificationState } from './verification.js';
 import type { Failure } from './failures.js';
+import { touchGoal } from './activity.js';
 
 export interface ResumeState {
   goal: Goal;
@@ -45,6 +46,7 @@ function recommend(
 }
 
 export function resumeGoal(db: BrainDb, id: string): ResumeState {
+  touchGoal(db, id);
   const goal = getGoal(db, id);
   const all = listWorkUnits(db, id);
   const completedWork = all.filter(w => ['COMPLETED', 'SKIPPED'].includes(w.status));
