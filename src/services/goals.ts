@@ -1,10 +1,10 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { goals, goalRequirements, goalQuestions, observations } from '../db/schema.js';
+import { goals, goalRequirements, goalQuestions, observations, workUnits, workUnitRequirements } from '../db/schema.js';
 import { nextGoalId } from '../ids.js';
 import { addDecision } from './decisions.js';
 import { isStale } from './activity.js';
-import { COVERAGE_CATEGORIES, lockFindings, uncoveredCategories, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
+import { coverageFindings, COVERAGE_CATEGORIES, lockFindings, uncoveredCategories, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
 import { principleAckRows, principleRows } from './principle-rows.js';
 
 export type Goal = typeof goals.$inferSelect;
@@ -255,6 +255,17 @@ export function startGoal(db: BrainDb, id: string): Goal {
   const g = getGoal(db, id);
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot start.`);
   if (!g.lockedAt) throw new Error(`Goal ${id} must be locked before starting (§10).`);
+  if (g.rulesVersion >= 1) {
+    const units = db.select().from(workUnits).where(eq(workUnits.goalId, id)).all();
+    const links = units.length
+      ? db.select().from(workUnitRequirements).where(inArray(workUnitRequirements.workUnitId, units.map(u => u.id))).all()
+      : [];
+    const uncovered = coverageFindings(listRequirements(db, id).map(toReqRow), units, links)
+      .filter(f => f.kind === 'uncovered');
+    if (uncovered.length > 0) {
+      throw new ContractIncompleteError(`Cannot start ${id}; plan does not cover the contract: ${uncovered.map(f => f.message).join('; ')}`);
+    }
+  }
   return setStatus(db, id, 'EXECUTING', { startedAt: g.startedAt ?? now() });
 }
 

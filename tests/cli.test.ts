@@ -27,9 +27,9 @@ describe('brain CLI end-to-end', () => {
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
+    const wu = brain('work', 'create', g.id, 'Write scanner', '--serves', String(r.id));
     brain('goal', 'start', g.id);
 
-    const wu = brain('work', 'create', g.id, 'Write scanner');
     expect(wu.id).toMatch(/^WU-/);
 
     brain('decision', 'add', 'Use fast-glob for scanning', '-g', g.id, '-r', 'simplest');
@@ -83,7 +83,9 @@ describe('brain CLI end-to-end', () => {
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
+    const w2 = brain('work', 'create', g.id, 'Do e2e', '--serves', String(r.id));
     brain('goal', 'start', g.id);
+    brain('work', 'update', w2.id, '--status', 'COMPLETED');
     brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--passed', '--command', 'true');
     const state = brain('goal', 'resume', g.id);
     expect(state.requirements[0].status).toBe('PASSED');

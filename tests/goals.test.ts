@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb, makeLockable } from './helpers.js';
+import { createTestDb, makeLockable, makeStartable } from './helpers.js';
 import {
   createGoal, getGoal, listGoals, currentGoal, addRequirement,
   setRequirementStatus, lockGoal, startGoal, blockGoal, completeGoal,
@@ -36,6 +36,7 @@ describe('goals service', () => {
     const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
+    makeStartable(db, g.id);
     startGoal(db, g.id);
     expect(() => completeGoal(db, g.id)).toThrow(/tests pass/);
     setRequirementStatus(db, r.id, 'PASSED');

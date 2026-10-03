@@ -84,7 +84,7 @@ export function buildServer(db: BrainDb): McpServer {
     goalId: z.string(), title: z.string(), description: z.string().optional(),
     workType: z.string().optional(), priority: z.number().optional(),
     complexity: z.enum(['trivial', 'low', 'medium', 'high', 'critical']).optional(),
-    dependsOn: z.array(z.string()).optional(),
+    dependsOn: z.array(z.string()).optional(), serves: z.array(z.number()).optional(),
   }, (a) => work.createWorkUnit(db, a));
   tool('brain_work_update', 'Update a work unit (status/title)', {
     id: z.string(), status: z.string().optional(), title: z.string().optional(),

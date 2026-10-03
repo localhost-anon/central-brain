@@ -14,9 +14,9 @@ describe('goal resume (§72)', () => {
     const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
-    startGoal(db, g.id);
-    const a = createWorkUnit(db, { goalId: g.id, title: 'Backend' });
+    const a = createWorkUnit(db, { goalId: g.id, title: 'Backend', serves: [r.id] });
     const b = createWorkUnit(db, { goalId: g.id, title: 'Frontend', dependsOn: [a.id] });
+    startGoal(db, g.id);
     updateWorkUnit(db, a.id, { status: 'COMPLETED' });
     addFailure(db, { errorMessage: 'flaky test', goalId: g.id });
     const state = resumeGoal(db, g.id);

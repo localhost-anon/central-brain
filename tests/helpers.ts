@@ -1,4 +1,5 @@
 import { addRequirement, listRequirements, setGoalFields } from '../src/services/goals.js';
+import { createWorkUnit } from '../src/services/work.js';
 import { openDb, migrateDb, type BrainDb } from '../src/db/connection.js';
 
 export function createTestDb(): BrainDb {
@@ -16,3 +17,10 @@ export function makeLockable(db: BrainDb, goalId: string): void {
   }
 }
 
+
+/** One work unit serving every required success criterion, so a v1 goal can start. */
+export function makeStartable(db: BrainDb, goalId: string) {
+  const serves = listRequirements(db, goalId)
+    .filter(r => r.requirementType === 'success_criterion' && r.priority === 'required').map(r => r.id);
+  return createWorkUnit(db, { goalId, title: 'implement', serves });
+}

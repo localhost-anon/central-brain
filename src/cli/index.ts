@@ -134,11 +134,13 @@ workCmd.command('create <goalId> <title>')
   .option('-d, --description <text>').option('--type <workType>')
   .option('--complexity <level>', 'trivial|low|medium|high|critical')
   .option('--priority <n>').option('--depends-on <ids>', 'comma-separated work unit ids')
+  .option('--serves <ids>', 'comma-separated requirement ids this unit serves')
   .action((goalId, title, o) => run(() => out(work.createWorkUnit(db(), {
     goalId, title, description: o.description, workType: o.type,
     complexity: o.complexity,
     priority: o.priority ? Number(o.priority) : undefined,
     dependsOn: o.dependsOn ? String(o.dependsOn).split(',') : undefined,
+    serves: o.serves ? String(o.serves).split(',').map(Number) : undefined,
   }))));
 workCmd.command('update <id>').option('--status <status>').option('--title <t>')
   .action((id, o) => run(() => out(work.updateWorkUnit(db(), id, { status: o.status, title: o.title }))));
