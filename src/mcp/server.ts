@@ -71,6 +71,8 @@ export function buildServer(db: BrainDb): McpServer {
     type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption', 'scope', 'permission'])
       .default('success_criterion'),
     priority: z.enum(['required', 'optional']).optional(),
+    verifyMethod: z.enum(['test', 'command', 'api', 'inspection', 'manual']).optional(),
+    coverage: z.enum(['behaviour', 'data', 'failure_modes', 'edge_cases', 'non_functional', 'integration', 'completion']).optional(),
   }, (a) => goals.addRequirement(db, a.goalId, a));
   tool('brain_requirement_set_status', 'Set requirement status (PENDING|PASSED|FAILED|NOT_APPLICABLE)', {
     id: z.number(), status: z.enum(['PENDING', 'PASSED', 'FAILED', 'NOT_APPLICABLE']),

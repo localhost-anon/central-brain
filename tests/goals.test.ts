@@ -18,7 +18,7 @@ describe('goals service', () => {
   it('lock snapshots the contract and freezes requirements', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Add SSO', objective: 'MS auth works' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     const locked = lockGoal(db, g.id);
     expect(locked.status).toBe('LOCKED');
@@ -33,7 +33,7 @@ describe('goals service', () => {
   it('refuses completion while required success criteria are unmet', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
     startGoal(db, g.id);
@@ -45,7 +45,7 @@ describe('goals service', () => {
   it('NOT_APPLICABLE requires a reason', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'x' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'x', verifyMethod: 'test' });
     expect(() => setRequirementStatus(db, r.id, 'NOT_APPLICABLE')).toThrow(/reason/i);
     setRequirementStatus(db, r.id, 'NOT_APPLICABLE', 'superseded by design change');
     const row = db.select().from(goalRequirements).all()[0];

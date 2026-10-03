@@ -12,7 +12,7 @@ export function makeLockable(db: BrainDb, goalId: string): void {
   setGoalFields(db, goalId, { riskLevel: 'LOW' });
   addRequirement(db, goalId, { type: 'scope', description: 'test scope' });
   if (!listRequirements(db, goalId).some(r => r.requirementType === 'success_criterion' && r.priority === 'required')) {
-    addRequirement(db, goalId, { type: 'success_criterion', description: 'test criterion' });
+    addRequirement(db, goalId, { type: 'success_criterion', description: 'test criterion', verifyMethod: 'test' });
   }
 }
 

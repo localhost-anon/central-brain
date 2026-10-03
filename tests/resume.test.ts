@@ -11,7 +11,7 @@ describe('goal resume (§72)', () => {
   it('assembles full state and points at the next ready work unit', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Ship feature', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
     startGoal(db, g.id);

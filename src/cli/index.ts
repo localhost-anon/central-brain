@@ -113,8 +113,12 @@ const req = goal.command('requirement');
 req.command('add <goalId> <description>')
   .option('-t, --type <type>', 'objective|constraint|success_criterion|exclusion|assumption|scope|permission', 'success_criterion')
   .option('-p, --priority <p>', 'required|optional', 'required')
+  .option('--verify <method>', 'test|command|api|inspection|manual')
+  .option('--coverage <category>', 'behaviour|data|failure_modes|edge_cases|non_functional|integration|completion')
   .action((goalId, description, o) => run(() =>
-    out(goals.addRequirement(db(), goalId, { type: o.type, description, priority: o.priority }))));
+    out(goals.addRequirement(db(), goalId, {
+      type: o.type, description, priority: o.priority, verifyMethod: o.verify, coverage: o.coverage,
+    }))));
 req.command('status <id> <status>').option('-r, --reason <text>')
   .action((id, status, o) => run(() => {
     goals.setRequirementStatus(db(), Number(id), status, o.reason);

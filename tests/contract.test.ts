@@ -16,7 +16,7 @@ describe('goal contract (§9) and lock gate', () => {
     const g = createGoal(db, { title: 'SSO', objective: 'Users sign in with Microsoft' });
     expect(checkContract(db, g.id).gaps.map(x => x.field).sort())
       .toEqual(['risk_level', 'scope', 'success_criterion']);
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works', verifyMethod: 'test' });
     addRequirement(db, g.id, { type: 'scope', description: 'auth service + login UI' });
     setGoalFields(db, g.id, { riskLevel: 'HIGH' });
     expect(checkContract(db, g.id)).toMatchObject({ ready: true, gaps: [] });
@@ -28,7 +28,7 @@ describe('goal contract (§9) and lock gate', () => {
     addRequirement(db, g.id, { type: 'scope', description: 's' });
     addRequirement(db, g.id, { type: 'success_criterion', description: 'nice', priority: 'optional' });
     expect(checkContract(db, g.id).gaps.map(x => x.field)).toEqual(['success_criterion']);
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'must' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'must', verifyMethod: 'test' });
     addOpenQuestion(db, g.id, 'Keep password login?');
     const c = checkContract(db, g.id);
     expect(c.ready).toBe(false);
@@ -62,7 +62,7 @@ describe('goal contract (§9) and lock gate', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o', riskLevel: 'LOW' });
     addRequirement(db, g.id, { type: 'scope', description: 's' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'c' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'c', verifyMethod: 'test' });
     db.$client.prepare("INSERT INTO goal_questions (goal_id, question, answer, status, created_at) VALUES (?, 'Q?', 'A.', 'answered', ?)")
       .run(g.id, new Date().toISOString());
     const snap = JSON.parse(lockGoal(db, g.id).contractSnapshot!);

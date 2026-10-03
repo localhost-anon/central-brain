@@ -69,7 +69,7 @@ describe('goal questions', () => {
     const g = createGoal(db, { title: 't', objective: 'o' });
     upsertBrainQuestion(db, g.id, 'missing:scope', 'What is in scope?');
     addRequirement(db, g.id, { type: 'scope', description: 'auth only' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'c' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'c', verifyMethod: 'test' });
     setGoalFields(db, g.id, { riskLevel: 'LOW' });
     expect(checkContract(db, g.id).ready).toBe(true);
   });
@@ -81,7 +81,7 @@ describe('goal questions', () => {
     expect(getGoal(db, g.id).clarificationStatus).toBe('pending');
     addRequirement(db, g.id, { type: 'scope', description: 'backend only' });
     setGoalFields(db, g.id, { riskLevel: 'LOW' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'works' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'works', verifyMethod: 'test' });
     // (b) all three agree before locking
     expect(checkContract(db, g.id).openQuestions).toHaveLength(0);
     expect(refreshClarificationStatus(db, g.id)).toBe('complete');

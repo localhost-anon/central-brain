@@ -39,7 +39,7 @@ describe('brain MCP server', () => {
     expect(g.id).toMatch(/^GOAL-/);
     await client.callTool({
       name: 'brain_requirement_add',
-      arguments: { goalId: g.id, description: 'login works', type: 'success_criterion' },
+      arguments: { goalId: g.id, description: 'login works', type: 'success_criterion', verifyMethod: 'test' },
     });
     await client.callTool({ name: 'brain_requirement_add', arguments: { goalId: g.id, description: 'auth only', type: 'scope' } });
     await client.callTool({ name: 'brain_goal_set', arguments: { id: g.id, risk: 'LOW' } });

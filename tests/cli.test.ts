@@ -23,7 +23,7 @@ describe('brain CLI end-to-end', () => {
     const g = brain('goal', 'create', 'Implement project scanning', '-o', 'Brain can scan ~/Projects');
     expect(g.status).toBe('DRAFT');
 
-    const r = brain('goal', 'requirement', 'add', g.id, 'scanner detects package.json projects');
+    const r = brain('goal', 'requirement', 'add', g.id, 'scanner detects package.json projects', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
@@ -55,7 +55,7 @@ describe('brain CLI end-to-end', () => {
 
   it('fails loudly when completing with unmet criteria', { timeout: 120000 }, () => {
     const g = brain('goal', 'create', 'Another goal');
-    brain('goal', 'requirement', 'add', g.id, 'never verified');
+    brain('goal', 'requirement', 'add', g.id, 'never verified', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
@@ -79,7 +79,7 @@ describe('brain CLI end-to-end', () => {
     expect(brain('failure', 'search', 'etimedout').length).toBe(1);
 
     // verification drives requirement status; resume recommends completion
-    const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion');
+    const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
@@ -117,7 +117,8 @@ describe('brain CLI end-to-end', () => {
     const qs = brain('goal', 'question', 'list', g.id, '--open');
     const byKey = (k: string) => qs.find((q: any) => q.checkKey === k).id;
     brain('goal', 'question', 'answer', String(byKey('missing:scope')), 'auth service and login UI', '--as', 'scope');
-    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end', '--as', 'success_criterion');
+    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end');
+    brain('goal', 'requirement', 'add', g.id, 'Microsoft login works end to end', '--verify', 'test');
     brain('goal', 'question', 'answer', String(byKey('missing:risk_level')), 'HIGH');
     brain('goal', 'question', 'answer', String(byKey('review:behaviour')), 'User chose: existing password users are migrated on next login', '--as', 'constraint');
     brain('goal', 'set', g.id, '--risk', 'HIGH');
