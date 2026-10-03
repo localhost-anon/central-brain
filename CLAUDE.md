@@ -570,6 +570,10 @@ Possible states:
 
 Do not mark a Goal complete while required criteria remain PENDING or FAILED.
 
+Record each verification with a verdict: `verified`, `partial` or `failed`. `verified` needs real output as actual result and a verification type matching the criterion's `verify_method`. A `partial` verdict does not satisfy a criterion. Completion claims are not evidence.
+
+Run `goal converge` to list typed findings (uncovered criteria, missing or contradicting evidence, unresolved failures, open work) and fix them until it reports converged.
+
 ---
 
 # 19. Completion
@@ -588,6 +592,8 @@ Before completing a Goal:
 10. Update affected project/system knowledge.
 11. Record resulting topology changes.
 12. Mark the Goal complete.
+
+Completion on a v1 goal runs converge and is refused while any CRITICAL or HIGH finding remains. `--force` requires a reason, is recorded as a decision, and permanently marks the goal as forced completion.
 
 The final user response should summarize the outcome rather than narrating every implementation step.
 
