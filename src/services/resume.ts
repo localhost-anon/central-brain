@@ -7,6 +7,7 @@ import { listWorkUnits, readyWorkUnits, type WorkUnit } from './work.js';
 import { goalVerificationState } from './verification.js';
 import type { Failure } from './failures.js';
 import { touchGoal } from './activity.js';
+import { convergeGoal, type ConvergeReport } from './converge.js';
 
 export interface ResumeState {
   goal: Goal;
@@ -18,11 +19,13 @@ export interface ResumeState {
   unresolvedFailures: Failure[];
   requirements: Requirement[];
   nextRecommendedAction: string;
+  converge: ConvergeReport | null;
 }
 
 function recommend(
   goal: Goal, ready: WorkUnit[], pending: WorkUnit[], allPassed: boolean,
   intake: { openMaterial: number; ready: boolean },
+  converge: ConvergeReport | null,
 ): string {
   switch (goal.status) {
     case 'DRAFT':
@@ -37,6 +40,8 @@ function recommend(
     case 'FAILED':
     case 'CANCELLED': return `Goal is ${goal.status}; nothing to resume`;
     default: {
+      if (converge && !converge.converged) return converge.nextAction;
+      if (converge?.converged) return `Converged — complete the goal (brain goal complete ${goal.id})`;
       if (ready.length > 0) return `Work on ${ready[0].id}: ${ready[0].title}`;
       if (pending.length === 0 && allPassed) return 'All criteria passed — complete the goal';
       if (pending.length === 0) return 'Verify remaining success criteria';
@@ -57,6 +62,7 @@ export function resumeGoal(db: BrainDb, id: string): ResumeState {
   const { allRequiredPassed } = goalVerificationState(db, id);
   const contractCheck = checkContract(db, id);
   const intake = { openMaterial: contractCheck.openQuestions.length, ready: contractCheck.ready };
+  const converge = ['EXECUTING', 'VERIFYING', 'BLOCKED'].includes(goal.status) ? convergeGoal(db, id) : null;
   return {
     goal,
     contract: goal.contractSnapshot ? JSON.parse(goal.contractSnapshot) : null,
@@ -66,6 +72,7 @@ export function resumeGoal(db: BrainDb, id: string): ResumeState {
     decisions: listDecisions(db, { goalId: id }),
     unresolvedFailures,
     requirements: listRequirements(db, id),
-    nextRecommendedAction: recommend(goal, readyWork, pendingWork, allRequiredPassed, intake),
+    nextRecommendedAction: recommend(goal, readyWork, pendingWork, allRequiredPassed, intake, converge),
+    converge,
   };
 }

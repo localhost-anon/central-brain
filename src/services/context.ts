@@ -7,7 +7,7 @@ import type { Learning } from './knowledge.js';
 import type { Decision } from './decisions.js';
 import type { ModelRouting } from './model.js';
 import type { SearchResult } from './search.js';
-import { currentGoal, getGoal, listRequirements, listGoals, openMaterialQuestions as openQuestionsFor } from './goals.js';
+import { currentGoal, getGoal, listRequirements, listGoals, staleGoals, openMaterialQuestions as openQuestionsFor } from './goals.js';
 import { listWorkUnits } from './work.js';
 import { listKnowledge, listLearnings } from './knowledge.js';
 import { listDecisions } from './decisions.js';
@@ -24,6 +24,7 @@ export interface BrainContext {
   relatedGoals: { id: string; title: string; status: string }[];
   recommendedModel: ModelRouting;
   openMaterialQuestions: number;
+  staleGoals: { id: string; title: string; updatedAt: string }[];
 }
 
 function rankKnowledge(rows: Knowledge[], goalId?: string): Knowledge[] {
@@ -66,6 +67,13 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
     }
   }
 
+  let stale: BrainContext['staleGoals'] = [];
+  try {
+    stale = staleGoals(db).map(g => ({ id: g.id, title: g.title, updatedAt: g.updatedAt }));
+  } catch (err) {
+    if (pendingMigrations(db) === 0) throw err;
+  }
+
   // Allocate budget across four capped categories, then backfill.
   const cats: { rows: unknown[] }[] = [
     { rows: decisionsAll },
@@ -92,6 +100,7 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
     relatedGoals: relatedAll.slice(0, caps[3]),
     recommendedModel: recommendModel(db, { goalId: goal?.id }),
     openMaterialQuestions,
+    staleGoals: stale,
   };
 }
 

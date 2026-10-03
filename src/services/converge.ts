@@ -22,7 +22,9 @@ export function convergeGoal(db: BrainDb, goalId: string): ConvergeReport {
   const units = db.select().from(workUnits).where(eq(workUnits.goalId, goalId)).all();
   const links = units.length
     ? db.select().from(workUnitRequirements).where(inArray(workUnitRequirements.workUnitId, units.map(u => u.id))).all() : [];
-  const runs = db.select().from(verificationRuns).where(eq(verificationRuns.goalId, goalId)).all();
+  // Legacy runs (verdict NULL, pre-upgrade) are read as passed ? verified : failed.
+  const runs = db.select().from(verificationRuns).where(eq(verificationRuns.goalId, goalId)).all()
+    .map(r => ({ ...r, verdict: r.verdict ?? (r.passed ? 'verified' : 'failed') }));
   const open = db.select().from(failures).where(and(eq(failures.goalId, goalId), eq(failures.resolved, 0))).all();
 
   const findings = sortFindings([

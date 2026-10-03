@@ -89,7 +89,7 @@ describe('brain CLI end-to-end', () => {
     brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--verdict', 'verified', '--type', 'test', '--actual', 'observed', '--command', 'true');
     const state = brain('goal', 'resume', g.id);
     expect(state.requirements[0].status).toBe('PASSED');
-    expect(state.nextRecommendedAction).toBe('All criteria passed — complete the goal');
+    expect(state.nextRecommendedAction).toMatch(/^Converged — complete the goal \(brain goal complete GOAL-/);
   });
 
   it('phase 3: import + reindex + hybrid search e2e', { timeout: 300000 }, () => {

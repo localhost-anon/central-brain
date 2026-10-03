@@ -24,11 +24,13 @@ describe('goal resume (§72)', () => {
     expect(state.completedWork.map(w => w.id)).toEqual([a.id]);
     expect(state.readyWork.map(w => w.id)).toEqual([b.id]);
     expect(state.unresolvedFailures).toHaveLength(1);
-    expect(state.nextRecommendedAction).toBe(`Work on ${b.id}: Frontend`);
+    // converge's top finding now outranks plain "Work on" while the goal is not converged
+    expect(state.nextRecommendedAction).toMatch(/^fix CRITICAL /);
     // finish everything: recommendation flips to completion
     updateWorkUnit(db, b.id, { status: 'COMPLETED' });
     recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id, verificationType: 'test', actualResult: 'observed in test' });
-    expect(resumeGoal(db, g.id).nextRecommendedAction).toBe('All criteria passed — complete the goal');
+    // open failure still blocks convergence, so the top finding is recommended
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/^fix CRITICAL open_failure:/);
   });
 
   it('gives lifecycle-appropriate recommendations', () => {
