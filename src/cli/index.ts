@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import {
-  openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, SCHEMA_NOTICE, type BrainDb,
+  openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, type BrainDb,
 } from '../db/connection.js';
 import { backupDb } from '../db/backup.js';
 import * as goals from '../services/goals.js';
@@ -233,12 +233,8 @@ const ctx = program.command('context');
 ctx.command('get').option('-g, --goal <goalId>').option('--current')
   .option('-b, --budget <n>', 'max items', '30')
   .action((o) => run(() => {
-    const d = db({ migrate: false });
-    const pending = pendingMigrations(d) > 0;
-    out({
-      ...context.getContext(d, { goalId: o.goal, budget: Number(o.budget) }),
-      schemaPending: pending, ...(pending ? { notice: SCHEMA_NOTICE } : {}),
-    });
+    // getContext returns { schemaPending: true, notice } instead of querying a stale schema.
+    out(context.getContext(db({ migrate: false }), { goalId: o.goal, budget: Number(o.budget) }));
   }));
 ctx.command('search <query>').option('-n, --limit <n>')
   .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {

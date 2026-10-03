@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,9 +35,30 @@ export function appliedMigrations(db: BrainDb): number {
   }
 }
 
+function appliedHashes(db: BrainDb): Set<string> {
+  try {
+    const rows = db.$client.prepare('SELECT hash FROM __drizzle_migrations').all() as { hash: string }[];
+    return new Set(rows.map(r => r.hash));
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('no such table')) return new Set();
+    throw err;
+  }
+}
+
+/**
+ * Journal entries whose SQL (by sha256, as drizzle records it) is not in __drizzle_migrations.
+ * Counting by hash rather than row count means an applied migration from another branch
+ * cannot mask one of ours that is still pending.
+ */
 export function pendingMigrations(db: BrainDb): number {
-  const journal = JSON.parse(fs.readFileSync(path.join(migrationsFolder(), 'meta', '_journal.json'), 'utf8'));
-  return Math.max(0, journal.entries.length - appliedMigrations(db));
+  const folder = migrationsFolder();
+  const journal = JSON.parse(fs.readFileSync(path.join(folder, 'meta', '_journal.json'), 'utf8')) as
+    { entries: { tag: string }[] };
+  const applied = appliedHashes(db);
+  return journal.entries.filter(e => {
+    const sql = fs.readFileSync(path.join(folder, `${e.tag}.sql`)).toString();
+    return !applied.has(crypto.createHash('sha256').update(sql).digest('hex'));
+  }).length;
 }
 
 export const SCHEMA_NOTICE = 'Brain schema update pending — run `brain migrate`';

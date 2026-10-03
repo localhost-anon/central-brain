@@ -23,6 +23,13 @@ describe('resume + context integration', () => {
     const g = createGoal(db, { title: 'old', objective: 'o' });
     db.$client.prepare(`UPDATE goals SET updated_at = '2020-01-01T00:00:00Z' WHERE id = ?`).run(g.id);
     expect(getContext(db).staleGoals.map(s => s.id)).toEqual([g.id]);
+    expect((getContext(db) as any).staleNotice).toBe(`1 stale goals: ${g.id} — complete, cancel or resume`);
+  });
+
+  it('context staleNotice is null when nothing is stale', () => {
+    const db = createTestDb();
+    createGoal(db, { title: 'fresh', objective: 'o' });
+    expect((getContext(db) as any).staleNotice).toBeNull();
   });
   it('legacy runs (verdict NULL) are read as passed ? verified : failed (R5)', () => {
     const db = createTestDb();

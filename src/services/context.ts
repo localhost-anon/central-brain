@@ -1,4 +1,4 @@
-import { pendingMigrations, type BrainDb } from '../db/connection.js';
+import { pendingMigrations, SCHEMA_NOTICE, type BrainDb } from '../db/connection.js';
 import type { Goal } from './goals.js';
 import type { Requirement } from './goals.js';
 import type { WorkUnit } from './work.js';
@@ -25,6 +25,14 @@ export interface BrainContext {
   recommendedModel: ModelRouting;
   openMaterialQuestions: number;
   staleGoals: { id: string; title: string; updatedAt: string }[];
+  staleNotice: string | null;
+  schemaPending: false;
+}
+
+/** Returned instead of a context when the schema is behind: the new columns may not exist yet. */
+export interface SchemaPendingContext {
+  schemaPending: true;
+  notice: string;
 }
 
 function rankKnowledge(rows: Knowledge[], goalId?: string): Knowledge[] {
@@ -38,7 +46,11 @@ function rankKnowledge(rows: Knowledge[], goalId?: string): Knowledge[] {
   );
 }
 
-export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number } = {}): BrainContext {
+export function getContext(
+  db: BrainDb, opts: { goalId?: string; budget?: number } = {},
+): BrainContext | SchemaPendingContext {
+  // Passive path (SessionStart hook): never query columns a pending migration adds.
+  if (pendingMigrations(db) > 0) return { schemaPending: true, notice: SCHEMA_NOTICE };
   const budget = opts.budget ?? 30;
   const goal = opts.goalId ? getGoal(db, opts.goalId) : currentGoal(db) ?? null;
 
@@ -58,21 +70,14 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
 
   let openMaterialQuestions = 0;
   if (goal) {
-    try {
-      openMaterialQuestions = openQuestionsFor(db, goal.id).length;
-    } catch (err) {
-      // Only a pending schema (passive path, columns may not exist yet) is tolerated.
-      if (pendingMigrations(db) === 0) throw err;
-      openMaterialQuestions = 0;
-    }
+    openMaterialQuestions = openQuestionsFor(db, goal.id).length;
   }
 
-  let stale: BrainContext['staleGoals'] = [];
-  try {
-    stale = staleGoals(db).map(g => ({ id: g.id, title: g.title, updatedAt: g.updatedAt }));
-  } catch (err) {
-    if (pendingMigrations(db) === 0) throw err;
-  }
+  const stale: BrainContext['staleGoals'] =
+    staleGoals(db).map(g => ({ id: g.id, title: g.title, updatedAt: g.updatedAt }));
+  const staleNotice = stale.length > 0
+    ? `${stale.length} stale goals: ${stale.map(g => g.id).join(', ')} — complete, cancel or resume`
+    : null;
 
   // Allocate budget across four capped categories, then backfill.
   const cats: { rows: unknown[] }[] = [
@@ -101,6 +106,8 @@ export function getContext(db: BrainDb, opts: { goalId?: string; budget?: number
     recommendedModel: recommendModel(db, { goalId: goal?.id }),
     openMaterialQuestions,
     staleGoals: stale,
+    staleNotice,
+    schemaPending: false,
   };
 }
 
