@@ -982,6 +982,15 @@ NOT_APPLICABLE
 
 `NOT_APPLICABLE` requires a `status_reason`.
 
+Two additive columns support rules v1 (see "Rules versions" after §64):
+
+```text
+verify_method   test | command | api | inspection | manual   (how a success_criterion is verified)
+coverage        behaviour | data | failure_modes | edge_cases | non_functional | integration | completion
+```
+
+On a v1 goal every required `success_criterion` must be atomic and carry a `verify_method`. Answering a question `--as success_criterion` can carry `--verify`/`--coverage`. A pending Brain `review:coverage` question stops blocking once every coverage category is tagged (auto-answered "covered via contract").
+
 Requirement types:
 
 ```text
@@ -1514,7 +1523,9 @@ CREATE TABLE verification_runs (
 );
 ```
 
-`requirement_id` links a verification run to the success criterion it verifies. This is what makes the Completion Rule (§64) computable: a criterion moves to `PASSED` only when a linked verification run passes.
+`requirement_id` links a verification run to the success criterion it verifies. This is what makes the Completion Rule (§64) computable: a criterion moves to `PASSED` only when a linked verification run is `verified`.
+
+Runs also carry a `verdict` (additive column): `verified | partial | failed`. When `verdict` is absent, `passed` maps to `verified`/`failed`; converge reads legacy runs (verdict NULL) as `passed ? verified : failed`. Requirement status follows the verdict: `verified` -> `PASSED`, `failed` -> `FAILED`, `partial` -> `PENDING`. On v1 goals `verified` needs a non-empty `actual_result` and a `verification_type` equal to the criterion's `verify_method`. CLI: `brain verify add --verdict verified|partial|failed`.
 
 ---
 
@@ -2350,6 +2361,8 @@ FAILED
 NOT_APPLICABLE
 ```
 
+On rules v1 goals, criteria must be atomic (one checkable claim each), carry a `verify_method`, and be evidenced by a run with a `verdict` (§35). `brain goal converge GOAL-…` reports typed findings (`{ id, severity, kind, ref, message }`) for: non-atomic or unverifiable criteria, criteria no work unit serves (`uncovered`), work units serving no criterion (`unrequested`), criteria with no verified run (`missing`), latest verdict `failed` (`contradicts`), `partial` or stale evidence, `review` items, unresolved failures (`open_failure`), unfinished work, and principle exceptions. Applicable principles (knowledge rows with category `principle`, GLOBAL or scoped to a linked project; predicate in `src/services/principle-rows.ts`) must be acknowledged before lock via `brain principle ack`. Work units link to criteria through `work_unit_requirements`; projects link through `brain goal link-project`.
+
 ---
 
 # 64. Completion Rule
@@ -2373,6 +2386,19 @@ NOT_APPLICABLE
 ```
 
 with a recorded reason.
+
+On rules v1 goals `brain goal complete` additionally runs converge and refuses while any CRITICAL or HIGH finding exists. The report is stored in `goals.converge_snapshot` and `completion_mode` is set to `normal`. `--force` always requires `--reason`: it records a MEDIUM decision, still stores the snapshot, and permanently marks `completion_mode = 'forced'`. `brain goal cancel GOAL-… <reason>` ends a goal without completion. Goals with no activity for 7 days (`BRAIN_STALE_DAYS` overrides) are reported as stale.
+
+## Rules versions
+
+`goals.rules_version` selects which gates apply:
+
+```text
+0  grandfathered at migration: goals already locked at migration keep the legacy §9 / §64 checks; unlocked goals get v1 when they lock and cannot complete while unlocked (R7)
+1  set by lockGoal; adds atomic criteria, verify_method, principle acks, coverage check at lock; uncovered gate at start; converge gate at complete
+```
+
+The migration is additive only; existing rows are never rewritten. Unlocked DRAFT goals get v1 when they lock. The failure rule is not grandfathered: resolving any failure needs a `verified` solution with a `reproduction` note (a legacy `successful: true` without one is stored as `partial` and does not resolve). `scripts/check-migration-on-copy.ts` migrates a copy of the live DB and asserts goals are unchanged and v0.
 
 ---
 
@@ -2596,8 +2622,11 @@ decisions
 modified files
 test state
 known failures
+converge findings
 next recommended action
 ```
+
+Next action order: ready work first, then "Converged — complete" when no blocking findings remain, then the top converge finding.
 
 No Markdown handover file required.
 

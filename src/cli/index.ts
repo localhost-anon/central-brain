@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import {
-  openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, SCHEMA_NOTICE, type BrainDb,
+  openDb, migrateDb, resolveDbPath, appliedMigrations, pendingMigrations, type BrainDb,
 } from '../db/connection.js';
 import { backupDb } from '../db/backup.js';
 import * as goals from '../services/goals.js';
@@ -20,6 +20,8 @@ import { hybridSearch } from '../services/hybrid-search.js';
 import { importClaudeMem } from '../services/import-claude-mem.js';
 import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
+import { convergeGoal } from '../services/converge.js';
+import * as principles from '../services/principles.js';
 
 function db(opts: { migrate?: boolean } = {}): BrainDb {
   const handle = openDb();
@@ -92,20 +94,31 @@ goal.command('intake <id>').description('Intake report: context, gaps, review it
 
 const question = goal.command('question');
 question.command('add <goalId> <text>').option('--detail', 'record only; never blocks lock')
+  .option('--recommended <answer>', 'recommended answer to offer the user')
   .action((goalId, text, o) => run(() => out(questions.addQuestion(db(), goalId, {
-    question: text, materiality: o.detail ? 'detail' : 'material',
+    question: text, materiality: o.detail ? 'detail' : 'material', recommended: o.recommended,
   }))));
 question.command('answer <id> <answer>')
   .option('--as <type>', 'constraint|exclusion|assumption|scope|permission|success_criterion')
-  .action((id, answer, o) => run(() => out(questions.answerQuestion(db(), Number(id), answer, { as: o.as }))));
+  .option('--verify <method>', 'test|command|api|inspection|manual (with --as)')
+  .option('--coverage <category>', 'behaviour|data|failure_modes|edge_cases|non_functional|integration|completion (with --as)')
+  .action((id, answer, o) => run(() => out(questions.answerQuestion(db(), Number(id), answer, { as: o.as, verifyMethod: o.verify, coverage: o.coverage }))));
 question.command('dismiss <id> <reason>')
   .action((id, reason) => run(() => out(questions.dismissQuestion(db(), Number(id), reason))));
 question.command('list <goalId>').option('--open', 'pending only')
   .action((goalId, o) => run(() => out(questions.listQuestions(db(), goalId, { open: o.open }))));
 goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id))));
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
-goal.command('complete <id>').option('--force')
-  .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force }))));
+goal.command('complete <id>').option('--force').option('--reason <text>')
+  .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force, reason: o.reason }))));
+goal.command('converge <id>').description('Converge report: findings blocking completion')
+  .action((id) => run(() => out(convergeGoal(db(), id))));
+goal.command('cancel <id> <reason>').action((id, reason) => run(() => out(goals.cancelGoal(db(), id, reason))));
+goal.command('link-project <goalId> <project>')
+  .action((goalId, project) => run(() => out(principles.linkGoalProject(db(), goalId, project))));
+const principle = program.command('principle');
+principle.command('ack <goalId> <knowledgeId> <mode> <note>')
+  .action((goalId, k, mode, note) => run(() => out(principles.ackPrinciple(db(), { goalId, knowledgeId: Number(k), mode, note }))));
 goal.command('resume <id>').description('Full resume state + next recommended action (§72)')
   .action((id) => run(() => out(resumeGoal(db(), id))));
 
@@ -113,8 +126,12 @@ const req = goal.command('requirement');
 req.command('add <goalId> <description>')
   .option('-t, --type <type>', 'objective|constraint|success_criterion|exclusion|assumption|scope|permission', 'success_criterion')
   .option('-p, --priority <p>', 'required|optional', 'required')
+  .option('--verify <method>', 'test|command|api|inspection|manual')
+  .option('--coverage <category>', 'behaviour|data|failure_modes|edge_cases|non_functional|integration|completion')
   .action((goalId, description, o) => run(() =>
-    out(goals.addRequirement(db(), goalId, { type: o.type, description, priority: o.priority }))));
+    out(goals.addRequirement(db(), goalId, {
+      type: o.type, description, priority: o.priority, verifyMethod: o.verify, coverage: o.coverage,
+    }))));
 req.command('status <id> <status>').option('-r, --reason <text>')
   .action((id, status, o) => run(() => {
     goals.setRequirementStatus(db(), Number(id), status, o.reason);
@@ -127,11 +144,13 @@ workCmd.command('create <goalId> <title>')
   .option('-d, --description <text>').option('--type <workType>')
   .option('--complexity <level>', 'trivial|low|medium|high|critical')
   .option('--priority <n>').option('--depends-on <ids>', 'comma-separated work unit ids')
+  .option('--serves <ids>', 'comma-separated requirement ids this unit serves')
   .action((goalId, title, o) => run(() => out(work.createWorkUnit(db(), {
     goalId, title, description: o.description, workType: o.type,
     complexity: o.complexity,
     priority: o.priority ? Number(o.priority) : undefined,
     dependsOn: o.dependsOn ? String(o.dependsOn).split(',') : undefined,
+    serves: o.serves ? String(o.serves).split(',').map(Number) : undefined,
   }))));
 workCmd.command('update <id>').option('--status <status>').option('--title <t>')
   .action((id, o) => run(() => out(work.updateWorkUnit(db(), id, { status: o.status, title: o.title }))));
@@ -214,12 +233,8 @@ const ctx = program.command('context');
 ctx.command('get').option('-g, --goal <goalId>').option('--current')
   .option('-b, --budget <n>', 'max items', '30')
   .action((o) => run(() => {
-    const d = db({ migrate: false });
-    const pending = pendingMigrations(d) > 0;
-    out({
-      ...context.getContext(d, { goalId: o.goal, budget: Number(o.budget) }),
-      schemaPending: pending, ...(pending ? { notice: SCHEMA_NOTICE } : {}),
-    });
+    // getContext returns { schemaPending: true, notice } instead of querying a stale schema.
+    out(context.getContext(db({ migrate: false }), { goalId: o.goal, budget: Number(o.budget) }));
   }));
 ctx.command('search <query>').option('-n, --limit <n>')
   .action((query, o) => runAsync(async () => out(await hybridSearch(db(), embedder(), query, {
@@ -238,10 +253,11 @@ failCmd.command('search <query>').option('-n, --limit <n>')
     types: ['failure'], limit: o.limit ? Number(o.limit) : undefined,
   }))));
 failCmd.command('show <id>').action((id) => run(() => out(fail.getFailure(db(), Number(id)))));
-failCmd.command('resolve <id>').action((id) => run(() => out(fail.resolveFailure(db(), Number(id)))));
+failCmd.command('resolve <id> <reason>').action((id, reason) => run(() => out(fail.resolveFailure(db(), Number(id), reason))));
 failCmd.command('solution <failureId> <solution>').option('--successful')
+  .option('--verdict <verdict>', 'verified|partial|failed').option('--reproduction <text>', 'how the original symptom was re-checked')
   .action((failureId, solution, o) => run(() => out(fail.addSolution(db(), Number(failureId), {
-    solution, successful: o.successful,
+    solution, successful: o.successful, verdict: o.verdict, reproduction: o.reproduction,
   }))));
 
 // ---- verification ----
@@ -249,11 +265,12 @@ const verifyCmd = program.command('verify');
 verifyCmd.command('add').requiredOption('-g, --goal <goalId>')
   .option('-r, --requirement <id>').option('--type <verificationType>')
   .option('--command <cmd>').option('--expected <text>').option('--actual <text>')
-  .option('--passed').option('--failed')
+  .option('--passed').option('--failed').option('--verdict <verdict>', 'verified|partial|failed')
   .action((o) => run(() => {
-    if (o.passed === o.failed) throw new Error('Specify exactly one of --passed or --failed');
+    if (!o.verdict && o.passed === o.failed) throw new Error('Specify exactly one of --passed or --failed, or --verdict');
+    if (o.verdict && (o.passed || o.failed)) throw new Error('Use --verdict alone, not with --passed/--failed');
     out(recordVerification(db(), {
-      passed: Boolean(o.passed), goalId: o.goal,
+      passed: o.verdict ? undefined : Boolean(o.passed), verdict: o.verdict, goalId: o.goal,
       requirementId: o.requirement ? Number(o.requirement) : undefined,
       verificationType: o.type, command: o.command,
       expectedResult: o.expected, actualResult: o.actual,

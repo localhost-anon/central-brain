@@ -98,3 +98,25 @@ describe('appliedMigrations guard', () => {
     expect(() => appliedMigrations(db)).toThrow();
   });
 });
+
+describe('lifecycle-gaps migration', () => {
+  it('adds columns and tables', () => {
+    const db = createTestDb();
+    const cols = (t: string) => (db.$client.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map(c => c.name);
+    expect(cols('goals')).toEqual(expect.arrayContaining(['rules_version', 'completion_mode', 'converge_snapshot']));
+    expect(cols('goal_requirements')).toEqual(expect.arrayContaining(['verify_method', 'coverage']));
+    expect(cols('goal_questions')).toContain('recommended');
+    expect(cols('verification_runs')).toContain('verdict');
+    expect(cols('failures')).toContain('resolution_note');
+    expect(cols('failure_solutions')).toEqual(expect.arrayContaining(['verdict', 'reproduction']));
+    expect(cols('goal_projects')).toEqual(['goal_id', 'project_id']);
+    expect(cols('work_unit_requirements')).toEqual(['work_unit_id', 'requirement_id']);
+    expect(cols('goal_principle_acks')).toEqual(['goal_id', 'knowledge_id', 'mode', 'note', 'decision_id', 'created_at']);
+  });
+
+  it('existing goals default to rules_version 0', () => {
+    const db = createTestDb();
+    db.$client.prepare(`INSERT INTO goals (id, title, objective, created_at, updated_at) VALUES ('GOAL-X','t','o','2026-01-01','2026-01-01')`).run();
+    expect((db.$client.prepare(`SELECT rules_version FROM goals WHERE id='GOAL-X'`).get() as { rules_version: number }).rules_version).toBe(0);
+  });
+});

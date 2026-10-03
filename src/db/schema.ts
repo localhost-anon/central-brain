@@ -15,6 +15,9 @@ export const goals = sqliteTable('goals', {
   lockedAt: text('locked_at'),
   startedAt: text('started_at'),
   completedAt: text('completed_at'),
+  rulesVersion: integer('rules_version').notNull().default(0),
+  completionMode: text('completion_mode'),
+  convergeSnapshot: text('converge_snapshot'),
 });
 
 export const goalRequirements = sqliteTable('goal_requirements', {
@@ -25,6 +28,8 @@ export const goalRequirements = sqliteTable('goal_requirements', {
   priority: text('priority').notNull().default('required'),
   status: text('status').notNull().default('PENDING'),
   statusReason: text('status_reason'),
+  verifyMethod: text('verify_method'),
+  coverage: text('coverage'),
 });
 
 export const goalQuestions = sqliteTable('goal_questions', {
@@ -40,6 +45,7 @@ export const goalQuestions = sqliteTable('goal_questions', {
   checkKey: text('check_key'),
   requirementId: integer('requirement_id'),
   statusReason: text('status_reason'),
+  recommended: text('recommended'),
 }, (t) => [uniqueIndex('goal_questions_goal_check').on(t.goalId, t.checkKey)]);
 
 export const decisions = sqliteTable('decisions', {
@@ -178,6 +184,7 @@ export const failures = sqliteTable('failures', {
   resolved: integer('resolved').notNull().default(0),
   createdAt: text('created_at').notNull(),
   resolvedAt: text('resolved_at'),
+  resolutionNote: text('resolution_note'),
 });
 
 export const failureSolutions = sqliteTable('failure_solutions', {
@@ -185,6 +192,8 @@ export const failureSolutions = sqliteTable('failure_solutions', {
   failureId: integer('failure_id').notNull().references(() => failures.id),
   solution: text('solution').notNull(),
   successful: integer('successful'),
+  verdict: text('verdict'),
+  reproduction: text('reproduction'),
   createdAt: text('created_at').notNull(),
 });
 
@@ -222,6 +231,7 @@ export const verificationRuns = sqliteTable('verification_runs', {
   expectedResult: text('expected_result'),
   actualResult: text('actual_result'),
   passed: integer('passed'),
+  verdict: text('verdict'),
   createdAt: text('created_at').notNull(),
 });
 
@@ -234,3 +244,22 @@ export const embeddings = sqliteTable('embeddings', {
   vector: blob('vector', { mode: 'buffer' }).notNull(),
   createdAt: text('created_at').notNull(),
 }, (t) => [uniqueIndex('embeddings_source_model').on(t.sourceType, t.sourceId, t.model)]);
+
+export const goalProjects = sqliteTable('goal_projects', {
+  goalId: text('goal_id').notNull().references(() => goals.id),
+  projectId: text('project_id').notNull().references(() => projects.id),
+}, (t) => [primaryKey({ columns: [t.goalId, t.projectId] })]);
+
+export const workUnitRequirements = sqliteTable('work_unit_requirements', {
+  workUnitId: text('work_unit_id').notNull().references(() => workUnits.id),
+  requirementId: integer('requirement_id').notNull().references(() => goalRequirements.id),
+}, (t) => [primaryKey({ columns: [t.workUnitId, t.requirementId] })]);
+
+export const goalPrincipleAcks = sqliteTable('goal_principle_acks', {
+  goalId: text('goal_id').notNull().references(() => goals.id),
+  knowledgeId: integer('knowledge_id').notNull().references(() => knowledge.id),
+  mode: text('mode').notNull(),
+  note: text('note').notNull(),
+  decisionId: integer('decision_id'),
+  createdAt: text('created_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.goalId, t.knowledgeId] })]);

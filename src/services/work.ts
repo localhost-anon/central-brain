@@ -1,8 +1,9 @@
 import { asc, eq, inArray } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { workUnits, workUnitDependencies } from '../db/schema.js';
+import { workUnits, workUnitDependencies, goalRequirements, workUnitRequirements } from '../db/schema.js';
 import { workUnitIdFor } from '../ids.js';
 import { getGoal } from './goals.js';
+import { touchGoal } from './activity.js';
 
 export type WorkUnit = typeof workUnits.$inferSelect;
 
@@ -10,9 +11,13 @@ const now = () => new Date().toISOString();
 
 export function createWorkUnit(db: BrainDb, input: {
   goalId: string; title: string; description?: string; workType?: string;
-  complexity?: string; priority?: number; parentId?: string; dependsOn?: string[];
+  complexity?: string; priority?: number; parentId?: string; dependsOn?: string[]; serves?: number[];
 }): WorkUnit {
   getGoal(db, input.goalId);
+  for (const reqId of input.serves ?? []) {
+    const r = db.select().from(goalRequirements).where(eq(goalRequirements.id, reqId)).get();
+    if (!r || r.goalId !== input.goalId) throw new Error(`Requirement #${reqId} is not a requirement of ${input.goalId}.`);
+  }
   const id = workUnitIdFor(db, input.goalId);
   db.insert(workUnits).values({
     id, goalId: input.goalId, title: input.title,
@@ -24,7 +29,17 @@ export function createWorkUnit(db: BrainDb, input: {
   for (const dep of input.dependsOn ?? []) {
     db.insert(workUnitDependencies).values({ workUnitId: id, dependsOn: dep }).run();
   }
+  for (const reqId of new Set(input.serves ?? [])) {
+    db.insert(workUnitRequirements).values({ workUnitId: id, requirementId: reqId }).run();
+  }
+  touchGoal(db, input.goalId);
   return getWorkUnit(db, id);
+}
+
+export function workUnitLinks(db: BrainDb, goalId: string): { workUnitId: string; requirementId: number }[] {
+  const ids = listWorkUnits(db, goalId).map(w => w.id);
+  if (ids.length === 0) return [];
+  return db.select().from(workUnitRequirements).where(inArray(workUnitRequirements.workUnitId, ids)).all();
 }
 
 export function getWorkUnit(db: BrainDb, id: string): WorkUnit {
@@ -51,6 +66,7 @@ export function updateWorkUnit(db: BrainDb, id: string, patch: {
   }
   if (patch.status === 'COMPLETED') set.completedAt = now();
   db.update(workUnits).set(set).where(eq(workUnits.id, id)).run();
+  touchGoal(db, wu.goalId);
   return getWorkUnit(db, id);
 }
 

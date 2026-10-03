@@ -1,8 +1,12 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { goals, goalRequirements, goalQuestions, observations } from '../db/schema.js';
+import { goals, goalRequirements, goalQuestions, observations, workUnits, workUnitRequirements } from '../db/schema.js';
 import { nextGoalId } from '../ids.js';
 import { addDecision } from './decisions.js';
+import { convergeGoal } from './converge.js';
+import { isStale } from './activity.js';
+import { coverageFindings, COVERAGE_CATEGORIES, lockFindings, uncoveredCategories, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
+import { principleAckRows, principleRows } from './principle-rows.js';
 
 export type Goal = typeof goals.$inferSelect;
 export type Requirement = typeof goalRequirements.$inferSelect;
@@ -57,12 +61,33 @@ export function listGoals(db: BrainDb, opts: { status?: string } = {}): Goal[] {
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function currentGoal(db: BrainDb): Goal | undefined {
+export function currentGoal(db: BrainDb, opts: { now?: Date } = {}): Goal | undefined {
   return db.select().from(goals)
     .where(inArray(goals.status, ACTIVE_STATUSES))
     .orderBy(desc(goals.updatedAt))
-    .get();
+    .all()
+    .find(g => !isStale(g, opts.now));
 }
+
+export function staleGoals(db: BrainDb, at: Date = new Date()): Goal[] {
+  return listGoals(db).filter(g => isStale(g, at));
+}
+
+export function cancelGoal(db: BrainDb, id: string, reason: string): Goal {
+  const g = getGoal(db, id);
+  if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot cancel.`);
+  if (!reason?.trim()) throw new Error('Cancelling a goal requires a reason.');
+  db.insert(observations).values({
+    goalId: id, scopeType: 'GOAL', scopeId: `goal:${id}`,
+    observation: `Goal cancelled: ${reason.trim()}`, createdAt: now(),
+  }).run();
+  return setStatus(db, id, 'CANCELLED');
+}
+
+export const toReqRow = (r: Requirement): ReqRow => ({
+  id: r.id, requirementType: r.requirementType, description: r.description, priority: r.priority,
+  status: r.status, verifyMethod: r.verifyMethod, coverage: r.coverage,
+});
 
 export function listRequirements(db: BrainDb, goalId: string): Requirement[] {
   return db.select().from(goalRequirements).where(eq(goalRequirements.goalId, goalId)).all();
@@ -81,9 +106,14 @@ function contractGaps(db: BrainDb, goalId: string): ContractGap[] {
   return gaps;
 }
 
-function isFilledGapQuestion(q: GoalQuestion, gaps: ContractGap[]): boolean {
+function isFilledGapQuestion(q: GoalQuestion, gaps: ContractGap[], coverageDone = false): boolean {
+  if (coverageDone && q.source === 'brain' && q.checkKey === 'review:coverage') return true;
   if (q.source !== 'brain' || !q.checkKey?.startsWith('missing:')) return false;
   return !gaps.some(x => `missing:${x.field}` === q.checkKey);
+}
+
+function coverageComplete(db: BrainDb, goalId: string): boolean {
+  return uncoveredCategories(listRequirements(db, goalId).map(toReqRow)).length === 0;
 }
 
 function pendingMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
@@ -99,7 +129,8 @@ function pendingMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
  */
 export function openMaterialQuestions(db: BrainDb, goalId: string): GoalQuestion[] {
   const gaps = contractGaps(db, goalId);
-  return pendingMaterialQuestions(db, goalId).filter(q => !isFilledGapQuestion(q, gaps));
+  const coverageDone = coverageComplete(db, goalId);
+  return pendingMaterialQuestions(db, goalId).filter(q => !isFilledGapQuestion(q, gaps, coverageDone));
 }
 
 export function checkContract(db: BrainDb, goalId: string): ContractCheck {
@@ -126,16 +157,21 @@ const VALID_REQUIREMENT_TYPES = [
 
 export function addRequirement(
   db: BrainDb, goalId: string,
-  input: { type: string; description: string; priority?: 'required' | 'optional' },
+  input: { type: string; description: string; priority?: 'required' | 'optional'; verifyMethod?: string; coverage?: string },
 ): Requirement {
   if (!VALID_REQUIREMENT_TYPES.includes(input.type)) {
     throw new Error(`Invalid requirement type: ${input.type}`);
   }
+  if (input.verifyMethod !== undefined && !(VERIFY_METHODS as readonly string[]).includes(input.verifyMethod))
+    throw new Error(`Invalid verify method: ${input.verifyMethod} (expected ${VERIFY_METHODS.join(', ')})`);
+  if (input.coverage !== undefined && !(COVERAGE_CATEGORIES as readonly string[]).includes(input.coverage))
+    throw new Error(`Invalid coverage: ${input.coverage} (expected ${COVERAGE_CATEGORIES.join(', ')})`);
   const g = getGoal(db, goalId);
   if (g.lockedAt) throw new GoalLockedError(`Goal ${goalId} is locked; requirements are frozen (§18).`);
   const res = db.insert(goalRequirements).values({
     goalId, requirementType: input.type, description: input.description,
     priority: input.priority ?? 'required',
+    verifyMethod: input.verifyMethod ?? null, coverage: input.coverage ?? null,
   }).run();
   return db.select().from(goalRequirements)
     .where(eq(goalRequirements.id, Number(res.lastInsertRowid))).get()!;
@@ -169,24 +205,31 @@ export function lockGoal(db: BrainDb, id: string, opts: { force?: boolean; reaso
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot lock.`);
   if (opts.force && !opts.reason?.trim()) throw new Error('Force-locking requires a reason (recorded as a decision).');
   const check = checkContract(db, id);
+  const v1 = [
+    ...lockFindings(listRequirements(db, id).map(toReqRow)),
+    ...principleFindings(principleRows(db, id), principleAckRows(db, id), 'lock'),
+  ];
   const unresolved = [
     ...check.gaps.map(x => x.message),
     ...check.openQuestions.map(q => `open question #${q.id}: ${q.question}`),
+    ...v1.map(x => x.message),
   ];
-  if (!check.ready && !opts.force) {
+  const ready = check.ready && v1.length === 0;
+  if (!ready && !opts.force) {
     throw new ContractIncompleteError(`Cannot lock ${id}; contract incomplete (§9): ${unresolved.join('; ')}`);
   }
   // Brain gap questions whose field is filled are answered before freezing (same as intake),
   // so a locked goal with no real open questions ends with clarificationStatus 'complete'.
-  const filledGapQuestions = pendingMaterialQuestions(db, id).filter(q => isFilledGapQuestion(q, check.gaps));
+  const coverageDone = coverageComplete(db, id);
+  const filledGapQuestions = pendingMaterialQuestions(db, id).filter(q => isFilledGapQuestion(q, check.gaps, coverageDone));
   // better-sqlite3 transactions are connection-scoped, so addDecision(db, …) joins this transaction.
   db.transaction((tx) => {
     const ts = now();
     for (const q of filledGapQuestions) {
-      tx.update(goalQuestions).set({ answer: 'filled via contract', status: 'answered', answeredAt: ts })
+      tx.update(goalQuestions).set({ answer: q.checkKey === 'review:coverage' ? 'covered via contract' : 'filled via contract', status: 'answered', answeredAt: ts })
         .where(eq(goalQuestions.id, q.id)).run();
     }
-    if (!check.ready) {
+    if (!ready) {
       addDecision(db, {
         goalId: id, decision: `Force-locked ${id} with an incomplete contract`,
         reason: `${opts.reason} | unresolved: ${unresolved.join('; ')}`, riskLevel: 'MEDIUM', reversible: true,
@@ -203,7 +246,7 @@ export function lockGoal(db: BrainDb, id: string, opts: { force?: boolean; reaso
     });
     const clarificationStatus = check.openQuestions.length > 0 ? 'pending' : 'complete';
     tx.update(goals).set({
-      status: 'LOCKED', updatedAt: ts, lockedAt: ts, contractSnapshot: snapshot, clarificationStatus,
+      status: 'LOCKED', updatedAt: ts, lockedAt: ts, contractSnapshot: snapshot, clarificationStatus, rulesVersion: 1,
     }).where(eq(goals.id, id)).run();
   });
   return getGoal(db, id);
@@ -213,6 +256,17 @@ export function startGoal(db: BrainDb, id: string): Goal {
   const g = getGoal(db, id);
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot start.`);
   if (!g.lockedAt) throw new Error(`Goal ${id} must be locked before starting (§10).`);
+  if (g.rulesVersion >= 1) {
+    const units = db.select().from(workUnits).where(eq(workUnits.goalId, id)).all();
+    const links = units.length
+      ? db.select().from(workUnitRequirements).where(inArray(workUnitRequirements.workUnitId, units.map(u => u.id))).all()
+      : [];
+    const uncovered = coverageFindings(listRequirements(db, id).map(toReqRow), units, links)
+      .filter(f => f.kind === 'uncovered');
+    if (uncovered.length > 0) {
+      throw new ContractIncompleteError(`Cannot start ${id}; plan does not cover the contract: ${uncovered.map(f => f.message).join('; ')}`);
+    }
+  }
   return setStatus(db, id, 'EXECUTING', { startedAt: g.startedAt ?? now() });
 }
 
@@ -226,10 +280,30 @@ export function blockGoal(db: BrainDb, id: string, reason: string): Goal {
   return setStatus(db, id, 'BLOCKED');
 }
 
-export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean } = {}): Goal {
+export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean; reason?: string } = {}): Goal {
   const g = getGoal(db, id);
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot complete.`);
-  if (!opts.force) {
+  if (opts.force && !opts.reason?.trim()) throw new Error('Force-completing requires a reason (recorded as a decision).');
+  const report = convergeGoal(db, id);
+  const snapshot = JSON.stringify(report);
+  if (opts.force) {
+    addDecision(db, {
+      goalId: id, decision: `Force-completed ${id}`, riskLevel: 'MEDIUM', reversible: true,
+      reason: `${opts.reason!.trim()} | open findings: ${report.findings.map(f => f.id).join(', ') || 'none'}`,
+    });
+    return setStatus(db, id, 'COMPLETED', { completedAt: now(), completionMode: 'forced', convergeSnapshot: snapshot });
+  }
+  // R7: an unlocked contract was never gated (no criteria/verify-method/principle checks).
+  if (!g.lockedAt) {
+    throw new IncompleteCriteriaError(`Goal ${id} was never locked; lock its contract first (or force with a reason)`);
+  }
+  if (g.rulesVersion >= 1) {
+    const blocking = report.findings.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH');
+    if (blocking.length > 0) {
+      throw new IncompleteCriteriaError(`Cannot complete ${id}; not converged (§64): ` +
+        blocking.map(f => `[${f.severity}] ${f.message}`).join('; '));
+    }
+  } else {
     const unmet = listRequirements(db, id).filter(r =>
       r.requirementType === 'success_criterion' && r.priority === 'required' &&
       !['PASSED', 'NOT_APPLICABLE'].includes(r.status));
@@ -239,5 +313,5 @@ export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean } 
         unmet.map(r => `#${r.id} ${r.description} [${r.status}]`).join('; '));
     }
   }
-  return setStatus(db, id, 'COMPLETED', { completedAt: now() });
+  return setStatus(db, id, 'COMPLETED', { completedAt: now(), completionMode: 'normal', convergeSnapshot: snapshot });
 }

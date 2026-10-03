@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb, makeLockable } from './helpers.js';
+import { createTestDb, makeLockable, makeStartable, satisfyCriteria } from './helpers.js';
+import { updateWorkUnit } from '../src/services/work.js';
 import {
   createGoal, getGoal, listGoals, currentGoal, addRequirement,
   setRequirementStatus, lockGoal, startGoal, blockGoal, completeGoal,
@@ -18,7 +19,7 @@ describe('goals service', () => {
   it('lock snapshots the contract and freezes requirements', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Add SSO', objective: 'MS auth works' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'MS login works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     const locked = lockGoal(db, g.id);
     expect(locked.status).toBe('LOCKED');
@@ -33,19 +34,21 @@ describe('goals service', () => {
   it('refuses completion while required success criteria are unmet', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
+    const wu = makeStartable(db, g.id);
     startGoal(db, g.id);
     expect(() => completeGoal(db, g.id)).toThrow(/tests pass/);
-    setRequirementStatus(db, r.id, 'PASSED');
+    updateWorkUnit(db, wu.id, { status: 'COMPLETED' });
+    satisfyCriteria(db, g.id);
     expect(completeGoal(db, g.id).status).toBe('COMPLETED');
   });
 
   it('NOT_APPLICABLE requires a reason', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'x' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'x', verifyMethod: 'test' });
     expect(() => setRequirementStatus(db, r.id, 'NOT_APPLICABLE')).toThrow(/reason/i);
     setRequirementStatus(db, r.id, 'NOT_APPLICABLE', 'superseded by design change');
     const row = db.select().from(goalRequirements).all()[0];
@@ -72,7 +75,7 @@ describe('goals service', () => {
       .toThrow(/invalid/i);
     makeLockable(db, g.id);
     lockGoal(db, g.id);
-    completeGoal(db, g.id, { force: true });
+    completeGoal(db, g.id, { force: true, reason: 'test' });
     expect(() => blockGoal(db, g.id, 'late block')).toThrow(/cannot/i);
   });
 });

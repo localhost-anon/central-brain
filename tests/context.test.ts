@@ -10,7 +10,7 @@ describe('context engine', () => {
   it('assembles goal context with requirements and open work', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Add SSO', objective: 'MS auth' });
-    addRequirement(db, g.id, { type: 'success_criterion', description: 'login works' });
+    addRequirement(db, g.id, { type: 'success_criterion', description: 'login works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
     createWorkUnit(db, { goalId: g.id, title: 'Inspect auth' });

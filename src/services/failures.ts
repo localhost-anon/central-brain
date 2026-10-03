@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import type { BrainDb } from '../db/connection.js';
-import { failures, failureSolutions } from '../db/schema.js';
+import { failures, failureSolutions, observations } from '../db/schema.js';
 import { search, type SearchResult } from './search.js';
+import { touchGoal } from './activity.js';
+import { VERDICTS } from './contract-rules.js';
 
 export type Failure = typeof failures.$inferSelect;
 export type FailureSolution = typeof failureSolutions.$inferSelect;
@@ -17,6 +19,7 @@ export function addFailure(db: BrainDb, input: {
     workUnitId: input.workUnitId ?? null, failureType: input.failureType ?? null,
     context: input.context ?? null, createdAt: now(),
   }).run();
+  touchGoal(db, input.goalId);
   return db.select().from(failures).where(eq(failures.id, Number(res.lastInsertRowid))).get()!;
 }
 
@@ -32,22 +35,38 @@ export function searchFailures(db: BrainDb, query: string, opts: { limit?: numbe
   return search(db, query, { types: ['failure'], limit: opts.limit });
 }
 
-export function resolveFailure(db: BrainDb, id: number): Failure {
-  getFailure(db, id);
-  db.update(failures).set({ resolved: 1, resolvedAt: now() }).where(eq(failures.id, id)).run();
+export function resolveFailure(db: BrainDb, id: number, reason: string): Failure {
+  const f = getFailure(db, id);
+  if (!reason?.trim()) throw new Error('Resolving a failure directly requires a reason.');
+  db.update(failures).set({ resolved: 1, resolvedAt: now(), resolutionNote: reason.trim() }).where(eq(failures.id, id)).run();
+  db.insert(observations).values({
+    goalId: f.goalId, scopeType: f.goalId ? 'GOAL' : 'GLOBAL', scopeId: f.goalId ? `goal:${f.goalId}` : null,
+    observation: `Failure #${id} resolved: ${reason.trim()}`, createdAt: now(),
+  }).run();
+  touchGoal(db, f.goalId);
   return db.select().from(failures).where(eq(failures.id, id)).get()!;
 }
 
 export function addSolution(db: BrainDb, failureId: number, input: {
-  solution: string; successful?: boolean;
-}): FailureSolution {
-  getFailure(db, failureId);
+  solution: string; successful?: boolean; verdict?: 'verified' | 'partial' | 'failed'; reproduction?: string;
+}): FailureSolution & { resolved: boolean; note?: string } {
+  const f = getFailure(db, failureId);
+  if (input.verdict !== undefined && !(VERDICTS as readonly string[]).includes(input.verdict)) {
+    throw new Error(`Invalid verdict: ${input.verdict}`);
+  }
+  const reproduction = input.reproduction?.trim() || null;
+  let verdict: string | null = input.verdict ?? (input.successful === undefined ? null : input.successful ? 'verified' : 'failed');
+  let note: string | undefined;
+  if (verdict === 'verified' && !reproduction) {
+    verdict = 'partial'; // explicit or legacy (successful:true): without a reproduction it is only partial
+    note = 'Not resolved: re-run the original reproduction and pass `reproduction` (tests alone are partial).';
+  }
+  const resolved = verdict === 'verified' && !!reproduction;
   const res = db.insert(failureSolutions).values({
-    failureId, solution: input.solution,
-    successful: input.successful === undefined ? null : input.successful ? 1 : 0,
-    createdAt: now(),
+    failureId, solution: input.solution, successful: resolved ? 1 : 0, verdict, reproduction, createdAt: now(),
   }).run();
-  if (input.successful) resolveFailure(db, failureId);
-  return db.select().from(failureSolutions)
-    .where(eq(failureSolutions.id, Number(res.lastInsertRowid))).get()!;
+  if (resolved) db.update(failures).set({ resolved: 1, resolvedAt: now() }).where(eq(failures.id, failureId)).run();
+  touchGoal(db, f.goalId);
+  const row = db.select().from(failureSolutions).where(eq(failureSolutions.id, Number(res.lastInsertRowid))).get()!;
+  return { ...row, resolved, ...(note ? { note } : {}) };
 }

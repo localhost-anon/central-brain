@@ -19,15 +19,15 @@ describe('brain MCP server', () => {
   it('exposes the brain_* tool surface', async () => {
     const client = await connect();
     const tools = (await client.listTools()).tools.map(t => t.name);
-    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve', 'brain_project_scan', 'brain_failure_search', 'brain_goal_resume', 'brain_embed_reindex', 'brain_import_claude_mem', 'brain_goal_intake', 'brain_goal_set', 'brain_question_add', 'brain_question_answer', 'brain_question_dismiss', 'brain_question_list']) {
+    for (const t of ['brain_goal_create', 'brain_context_get', 'brain_knowledge_search', 'brain_decision_add', 'brain_model_recommend', 'brain_knowledge_supersede', 'brain_approval_resolve', 'brain_project_scan', 'brain_failure_search', 'brain_goal_resume', 'brain_embed_reindex', 'brain_import_claude_mem', 'brain_goal_intake', 'brain_goal_set', 'brain_question_add', 'brain_question_answer', 'brain_question_dismiss', 'brain_question_list', 'brain_goal_converge', 'brain_goal_cancel', 'brain_goal_link_project', 'brain_principle_ack']) {
       expect(tools).toContain(t);
     }
   });
 
-  it('registers 48 tools', async () => {
+  it('registers 52 tools', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(48);
+    expect(tools).toHaveLength(52);
   });
 
   it('creates, locks, and retrieves context for a goal via tools', async () => {
@@ -39,7 +39,7 @@ describe('brain MCP server', () => {
     expect(g.id).toMatch(/^GOAL-/);
     await client.callTool({
       name: 'brain_requirement_add',
-      arguments: { goalId: g.id, description: 'login works', type: 'success_criterion' },
+      arguments: { goalId: g.id, description: 'login works', type: 'success_criterion', verifyMethod: 'test' },
     });
     await client.callTool({ name: 'brain_requirement_add', arguments: { goalId: g.id, description: 'auth only', type: 'scope' } });
     await client.callTool({ name: 'brain_goal_set', arguments: { id: g.id, risk: 'LOW' } });
@@ -72,5 +72,29 @@ describe('brain MCP server', () => {
     const state = text(await client.callTool({ name: 'brain_goal_resume', arguments: { id: g.id } }));
     expect(state.unresolvedFailures).toHaveLength(1);
     expect(state.nextRecommendedAction).toMatch(/goal intake/i);
+  });
+
+  it('lifecycle-gap tools', async () => {
+    const client = await connect();
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await client.callTool({ name, arguments: args }) as { isError?: boolean; content: { text: string }[] };
+      return { err: !!r.isError, body: r.isError ? r.content[0]!.text : JSON.parse(r.content[0]!.text) };
+    };
+    const g = (await call('brain_goal_create', { title: 't', objective: 'o', riskLevel: 'LOW' })).body;
+    await call('brain_requirement_add', { goalId: g.id, type: 'scope', description: 's' });
+    const c = (await call('brain_requirement_add', { goalId: g.id, type: 'success_criterion', description: 'x works', verifyMethod: 'test', coverage: 'completion' })).body;
+    expect((await call('brain_goal_lock', { id: g.id })).err).toBe(false);
+    expect((await call('brain_goal_start', { id: g.id })).body).toMatch(/plan does not cover/);
+    const wu = (await call('brain_work_create', { goalId: g.id, title: 'impl', serves: [c.id] })).body;
+    expect((await call('brain_goal_start', { id: g.id })).err).toBe(false);
+    expect((await call('brain_goal_converge', { id: g.id })).body.converged).toBe(false);
+    await call('brain_work_update', { id: wu.id, status: 'COMPLETED' });
+    await call('brain_verification_record', { goalId: g.id, requirementId: c.id, verdict: 'verified', verificationType: 'test', actualResult: 'green' });
+    expect((await call('brain_goal_complete', { id: g.id })).body.completionMode).toBe('normal');
+    const g2 = (await call('brain_goal_create', { title: 'u', objective: 'o' })).body;
+    expect((await call('brain_goal_cancel', { id: g2.id, reason: 'dup' })).body.status).toBe('CANCELLED');
+    const f = (await call('brain_failure_record', { errorMessage: 'boom' })).body;
+    expect((await call('brain_failure_resolve', { id: f.id })).err).toBe(true);
+    expect((await call('brain_failure_solution_add', { failureId: f.id, solution: 's', verdict: 'verified', reproduction: 'gone' })).body.resolved).toBe(true);
   });
 });

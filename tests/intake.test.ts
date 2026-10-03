@@ -17,10 +17,10 @@ describe('intake report', () => {
     expect(r1.ready).toBe(false);
     expect(r1.gaps.map(x => x.field).sort()).toEqual(['risk_level', 'scope', 'success_criterion']);
     expect(listQuestions(db, g.id).map(q => q.checkKey).sort())
-      .toEqual(['missing:risk_level', 'missing:scope', 'missing:success_criterion', 'review:behaviour']);
-    expect(r1.nextAction).toMatch(/answer 4 material question/);
+      .toEqual(['missing:risk_level', 'missing:scope', 'missing:success_criterion', 'review:behaviour', 'review:coverage']);
+    expect(r1.nextAction).toMatch(/answer 5 material question/);
     await buildIntakeReport(db, fakeEmbedder(), g.id);
-    expect(listQuestions(db, g.id)).toHaveLength(4);
+    expect(listQuestions(db, g.id)).toHaveLength(5);
   });
 
   it('always asks the behaviour-choices question; it blocks lock until answered and is never duplicated', async () => {
@@ -31,9 +31,10 @@ describe('intake report', () => {
     const q = listQuestions(db, g.id).find(x => x.checkKey === 'review:behaviour')!;
     expect(q).toMatchObject({ source: 'brain', materiality: 'material', status: 'pending', question: BEHAVIOUR_QUESTION });
     expect(r1.ready).toBe(false);
-    expect(r1.nextAction).toMatch(/answer 1 material question/);
+    expect(r1.nextAction).toMatch(/answer 2 material question/);
     expect(() => lockGoal(db, g.id)).toThrow(/open question/);
     answerQuestion(db, q.id, 'User chose: finished = watched past 95%');
+    answerQuestion(db, listQuestions(db, g.id).find(x => x.checkKey === 'review:coverage')!.id, 'n/a: all categories — test');
     const r2 = await buildIntakeReport(db, fakeEmbedder(), g.id);
     expect(r2.ready).toBe(true);
     expect(listQuestions(db, g.id).filter(x => x.checkKey === 'review:behaviour')).toHaveLength(1);
@@ -49,7 +50,7 @@ describe('intake report', () => {
     dismissQuestion(db, qs.find(q => q.checkKey === 'missing:risk_level')!.id, 'will set via goal set');
     dismissQuestion(db, qs.find(q => q.checkKey === 'review:behaviour')!.id, 'no user-visible behaviour change');
     await buildIntakeReport(db, fakeEmbedder(), g.id);
-    expect(listQuestions(db, g.id)).toHaveLength(4);
+    expect(listQuestions(db, g.id)).toHaveLength(5);
   });
 
   it('auto-answers gap questions once their field is filled; ready → "ready to lock"', async () => {
@@ -59,6 +60,7 @@ describe('intake report', () => {
     makeLockable(db, g.id);
     const behaviour = listQuestions(db, g.id).find(q => q.checkKey === 'review:behaviour')!;
     answerQuestion(db, behaviour.id, 'none — internal change');
+    answerQuestion(db, listQuestions(db, g.id).find(q => q.checkKey === 'review:coverage')!.id, 'n/a: all categories — test');
     const r = await buildIntakeReport(db, fakeEmbedder(), g.id);
     expect(r.ready).toBe(true);
     expect(r.nextAction).toBe('ready to lock');

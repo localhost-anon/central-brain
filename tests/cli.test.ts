@@ -23,13 +23,13 @@ describe('brain CLI end-to-end', () => {
     const g = brain('goal', 'create', 'Implement project scanning', '-o', 'Brain can scan ~/Projects');
     expect(g.status).toBe('DRAFT');
 
-    const r = brain('goal', 'requirement', 'add', g.id, 'scanner detects package.json projects');
+    const r = brain('goal', 'requirement', 'add', g.id, 'scanner detects package.json projects', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
+    const wu = brain('work', 'create', g.id, 'Write scanner', '--serves', String(r.id));
     brain('goal', 'start', g.id);
 
-    const wu = brain('work', 'create', g.id, 'Write scanner');
     expect(wu.id).toMatch(/^WU-/);
 
     brain('decision', 'add', 'Use fast-glob for scanning', '-g', g.id, '-r', 'simplest');
@@ -48,14 +48,14 @@ describe('brain CLI end-to-end', () => {
     expect(rec.model).toBe('haiku');
 
     brain('work', 'update', wu.id, '--status', 'COMPLETED');
-    brain('goal', 'requirement', 'status', String(r.id), 'PASSED');
+    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--verdict', 'verified', '--type', 'test', '--actual', 'observed');
     const done = brain('goal', 'complete', g.id);
     expect(done.status).toBe('COMPLETED');
   });
 
   it('fails loudly when completing with unmet criteria', { timeout: 120000 }, () => {
     const g = brain('goal', 'create', 'Another goal');
-    brain('goal', 'requirement', 'add', g.id, 'never verified');
+    brain('goal', 'requirement', 'add', g.id, 'never verified', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
@@ -74,20 +74,22 @@ describe('brain CLI end-to-end', () => {
     // failure loop
     const g = brain('goal', 'create', 'Phase2 e2e goal');
     const f = brain('failure', 'add', 'ETIMEDOUT calling qdrant', '-g', g.id, '--type', 'network');
-    brain('failure', 'solution', String(f.id), 'increase timeout to 30s', '--successful');
+    brain('failure', 'solution', String(f.id), 'increase timeout to 30s', '--successful', '--reproduction', 'rechecked qdrant call; no timeout');
     expect(brain('failure', 'show', String(f.id)).resolved).toBe(1);
     expect(brain('failure', 'search', 'etimedout').length).toBe(1);
 
     // verification drives requirement status; resume recommends completion
-    const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion');
+    const r = brain('goal', 'requirement', 'add', g.id, 'e2e criterion', '--verify', 'test');
     brain('goal', 'requirement', 'add', g.id, 'test scope', '-t', 'scope');
     brain('goal', 'set', g.id, '--risk', 'LOW');
     brain('goal', 'lock', g.id);
+    const w2 = brain('work', 'create', g.id, 'Do e2e', '--serves', String(r.id));
     brain('goal', 'start', g.id);
-    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--passed', '--command', 'true');
+    brain('work', 'update', w2.id, '--status', 'COMPLETED');
+    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--verdict', 'verified', '--type', 'test', '--actual', 'observed', '--command', 'true');
     const state = brain('goal', 'resume', g.id);
     expect(state.requirements[0].status).toBe('PASSED');
-    expect(state.nextRecommendedAction).toBe('All criteria passed — complete the goal');
+    expect(state.nextRecommendedAction).toMatch(/^Converged — complete the goal \(brain goal complete GOAL-/);
   });
 
   it('phase 3: import + reindex + hybrid search e2e', { timeout: 300000 }, () => {
@@ -112,14 +114,15 @@ describe('brain CLI end-to-end', () => {
     const g = brain('goal', 'create', 'Add SSO', '-o', 'Users sign in with Microsoft');
     const r1 = brain('goal', 'intake', g.id);
     expect(r1.ready).toBe(false);
-    expect(r1.openQuestions).toHaveLength(4);
+    expect(r1.openQuestions).toHaveLength(5);
     expect(() => brain('goal', 'lock', g.id)).toThrow();
     const qs = brain('goal', 'question', 'list', g.id, '--open');
     const byKey = (k: string) => qs.find((q: any) => q.checkKey === k).id;
     brain('goal', 'question', 'answer', String(byKey('missing:scope')), 'auth service and login UI', '--as', 'scope');
-    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end', '--as', 'success_criterion');
+    brain('goal', 'question', 'answer', String(byKey('missing:success_criterion')), 'Microsoft login works end to end', '--as', 'success_criterion', '--verify', 'test');
     brain('goal', 'question', 'answer', String(byKey('missing:risk_level')), 'HIGH');
     brain('goal', 'question', 'answer', String(byKey('review:behaviour')), 'User chose: existing password users are migrated on next login', '--as', 'constraint');
+    brain('goal', 'question', 'answer', String(byKey('review:coverage')), 'n/a: all categories — e2e test');
     brain('goal', 'set', g.id, '--risk', 'HIGH');
     const extra = brain('goal', 'question', 'add', g.id, 'Keep password login?');
     brain('goal', 'question', 'dismiss', String(extra.id), 'covered by existing policy');
@@ -129,5 +132,13 @@ describe('brain CLI end-to-end', () => {
     const locked = brain('goal', 'lock', g.id);
     expect(locked.status).toBe('LOCKED');
     expect(JSON.parse(locked.contractSnapshot).answeredQuestions.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('brain CLI lifecycle commands', () => {
+  it('converges and cancels a goal', { timeout: 60000 }, () => {
+    const g = brain('goal', 'create', 'Converge me', '-o', 'obj');
+    expect(brain('goal', 'converge', g.id)).toHaveProperty('converged');
+    expect(brain('goal', 'cancel', g.id, 'duplicate').status).toBe('CANCELLED');
   });
 });

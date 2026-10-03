@@ -11,12 +11,12 @@ describe('goal resume (§72)', () => {
   it('assembles full state and points at the next ready work unit', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 'Ship feature', objective: 'o' });
-    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works' });
+    const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'works', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
-    startGoal(db, g.id);
-    const a = createWorkUnit(db, { goalId: g.id, title: 'Backend' });
+    const a = createWorkUnit(db, { goalId: g.id, title: 'Backend', serves: [r.id] });
     const b = createWorkUnit(db, { goalId: g.id, title: 'Frontend', dependsOn: [a.id] });
+    startGoal(db, g.id);
     updateWorkUnit(db, a.id, { status: 'COMPLETED' });
     addFailure(db, { errorMessage: 'flaky test', goalId: g.id });
     const state = resumeGoal(db, g.id);
@@ -27,8 +27,9 @@ describe('goal resume (§72)', () => {
     expect(state.nextRecommendedAction).toBe(`Work on ${b.id}: Frontend`);
     // finish everything: recommendation flips to completion
     updateWorkUnit(db, b.id, { status: 'COMPLETED' });
-    recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id });
-    expect(resumeGoal(db, g.id).nextRecommendedAction).toBe('All criteria passed — complete the goal');
+    recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id, verificationType: 'test', actualResult: 'observed in test' });
+    // open failure still blocks convergence, so the top finding is recommended
+    expect(resumeGoal(db, g.id).nextRecommendedAction).toMatch(/^fix CRITICAL open_failure:/);
   });
 
   it('gives lifecycle-appropriate recommendations', () => {
