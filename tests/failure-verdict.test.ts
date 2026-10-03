@@ -10,10 +10,13 @@ describe('failure resolution (criterion #101)', () => {
     expect(s.resolved).toBe(true);
     expect(getFailure(db, f.id).resolved).toBe(1);
   });
-  it('verified without reproduction does not resolve', () => {
+  it('verified without reproduction does not resolve and is stored partial', () => {
     const db = createTestDb();
     const f = addFailure(db, { errorMessage: 'timeout' });
-    expect(addSolution(db, f.id, { solution: 'x', verdict: 'verified' }).resolved).toBe(false);
+    const s = addSolution(db, f.id, { solution: 'x', verdict: 'verified' });
+    expect(s.resolved).toBe(false);
+    expect(s.verdict).toBe('partial');
+    expect(s.note).toMatch(/reproduction/);
     expect(getFailure(db, f.id).resolved).toBe(0);
   });
   it('legacy successful:true without reproduction is stored partial, not resolved', () => {

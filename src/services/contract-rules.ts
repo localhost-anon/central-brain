@@ -126,7 +126,8 @@ export function evidenceFindings(
     }
   }
   for (const x of openFailures) {
-    out.push(f('CRITICAL', 'open_failure', `failure:${x.id}`, `Unresolved failure #${x.id}: ${x.errorMessage ?? ''}`));
+    out.push(f('CRITICAL', 'open_failure', `failure:${x.id}`, `Unresolved failure #${x.id}: ${x.errorMessage ?? ''} — resolve with ` +
+      `\`failure solution ${x.id} "<fix>" --verdict verified --reproduction "…"\` or \`failure resolve ${x.id} <reason>\``));
   }
   return out;
 }

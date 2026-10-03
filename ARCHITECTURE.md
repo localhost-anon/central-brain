@@ -2394,7 +2394,7 @@ On rules v1 goals `brain goal complete` additionally runs converge and refuses w
 `goals.rules_version` selects which gates apply:
 
 ```text
-0  grandfathered at migration; every goal that already existed (locked or not) keeps the legacy §9 / §64 checks
+0  grandfathered at migration: goals already locked at migration keep the legacy §9 / §64 checks; unlocked goals get v1 when they lock and cannot complete while unlocked (R7)
 1  set by lockGoal; adds atomic criteria, verify_method, principle acks, coverage check at lock; uncovered gate at start; converge gate at complete
 ```
 

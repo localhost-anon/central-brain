@@ -8,11 +8,21 @@ prompt=$(jq -r '.prompt // ""' 2>/dev/null)
 # Slash commands and empty prompts get no reminder.
 case "$prompt" in /*|"") exit 0 ;; esac
 
+# Same staleness rule as `brain goal current` (activity.ts staleDays): positive number, else 7.
+stale_days="${BRAIN_STALE_DAYS:-7}"
+if ! printf '%s' "$stale_days" | grep -Eq '^[0-9]+([.][0-9]+)?$' || \
+   ! awk -v d="$stale_days" 'BEGIN { exit !(d > 0) }'; then
+  stale_days=7
+fi
+
 goal=""
 if [ -f "$DB" ]; then
-  goal=$(sqlite3 -readonly "$DB" \
+  # query_only, not -readonly: -readonly cannot open a WAL database when no other
+  # connection holds its -shm file, which silently dropped the goal line.
+  goal=$(sqlite3 -cmd "PRAGMA query_only=ON" "$DB" \
     "SELECT id || ' (' || status || '): ' || title FROM goals
      WHERE status IN ('LOCKED','PLANNING','EXECUTING','VERIFYING','BLOCKED')
+       AND julianday('now') - julianday(updated_at) <= $stale_days
      ORDER BY updated_at DESC LIMIT 1;" 2>/dev/null)
 fi
 

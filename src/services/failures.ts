@@ -58,7 +58,7 @@ export function addSolution(db: BrainDb, failureId: number, input: {
   let verdict: string | null = input.verdict ?? (input.successful === undefined ? null : input.successful ? 'verified' : 'failed');
   let note: string | undefined;
   if (verdict === 'verified' && !reproduction) {
-    if (input.verdict === undefined) verdict = 'partial'; // legacy successful:true
+    verdict = 'partial'; // explicit or legacy (successful:true): without a reproduction it is only partial
     note = 'Not resolved: re-run the original reproduction and pass `reproduction` (tests alone are partial).';
   }
   const resolved = verdict === 'verified' && !!reproduction;

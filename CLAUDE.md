@@ -570,6 +570,8 @@ Possible states:
 
 Do not mark a Goal complete while required criteria remain PENDING or FAILED.
 
+Every required success criterion carries a `verify_method` (`test`, `command`, `api`, `inspection` or `manual`) and states one claim; lock refuses criteria without one. Before lock, acknowledge every applicable principle (`principle ack`, `honoured` or `exception` with a note; an exception is recorded as a decision); lock refuses unacknowledged principles.
+
 Record each verification with a verdict: `verified`, `partial` or `failed`. `verified` needs real output as actual result and a verification type matching the criterion's `verify_method`. A `partial` verdict does not satisfy a criterion. Completion claims are not evidence.
 
 Run `goal converge` to list typed findings (uncovered criteria, missing or contradicting evidence, unresolved failures, open work) and fix them until it reports converged.
@@ -593,7 +595,7 @@ Before completing a Goal:
 11. Record resulting topology changes.
 12. Mark the Goal complete.
 
-Completion on a v1 goal runs converge and is refused while any CRITICAL or HIGH finding remains. `--force` requires a reason, is recorded as a decision, and permanently marks the goal as forced completion.
+A goal that was never locked cannot be completed (lock its contract first, or force with a reason). Completion on a v1 goal runs converge and is refused while any CRITICAL or HIGH finding remains. `--force` requires a reason, is recorded as a decision, and permanently marks the goal as forced completion.
 
 The final user response should summarize the outcome rather than narrating every implementation step.
 

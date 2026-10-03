@@ -69,8 +69,11 @@ describe('converge + complete gate (criterion #98)', () => {
     const db = createTestDb();
     const { g, wu } = started(db);
     updateWorkUnit(db, wu.id, { status: 'COMPLETED' }); satisfyCriteria(db, g.id);
-    addFailure(db, { goalId: g.id, errorMessage: 'flaky' });
+    const fl = addFailure(db, { goalId: g.id, errorMessage: 'flaky' });
     expect(() => completeGoal(db, g.id)).toThrow(/Unresolved failure/);
+    const msg = convergeGoal(db, g.id).findings.find(f => f.kind === 'open_failure')!.message;
+    expect(msg).toContain(`failure solution ${fl.id} "<fix>" --verdict verified --reproduction "…"`);
+    expect(msg).toContain(`failure resolve ${fl.id} <reason>`);
   });
 
   it('force requires reason (v0 and v1); forced completion marked and decided', () => {
