@@ -64,8 +64,8 @@ export function buildServer(db: BrainDb): McpServer {
   tool('brain_goal_block', 'Mark a goal blocked with a reason', { id: z.string(), reason: z.string() },
     (a) => goals.blockGoal(db, a.id, a.reason));
   tool('brain_goal_complete', 'Complete a goal (fails on unmet required success criteria)', {
-    id: z.string(), force: z.boolean().optional(),
-  }, (a) => goals.completeGoal(db, a.id, { force: a.force }));
+    id: z.string(), force: z.boolean().optional(), reason: z.string().optional(),
+  }, (a) => goals.completeGoal(db, a.id, { force: a.force, reason: a.reason }));
   tool('brain_requirement_add', 'Add a requirement to an unlocked goal', {
     goalId: z.string(), description: z.string(),
     type: z.enum(['objective', 'constraint', 'success_criterion', 'exclusion', 'assumption', 'scope', 'permission'])
@@ -184,7 +184,8 @@ export function buildServer(db: BrainDb): McpServer {
     failureId: z.number(), solution: z.string(), successful: z.boolean().optional(),
   }, (a) => fail.addSolution(db, a.failureId, a));
   tool('brain_verification_record', 'Record a verification run; linked requirement moves to PASSED/FAILED (§35)', {
-    passed: z.boolean(), goalId: z.string().optional(), workUnitId: z.string().optional(),
+    passed: z.boolean().optional(), verdict: z.enum(['verified', 'partial', 'failed']).optional(),
+    goalId: z.string().optional(), workUnitId: z.string().optional(),
     requirementId: z.number().optional(), verificationType: z.string().optional(),
     command: z.string().optional(), expectedResult: z.string().optional(),
     actualResult: z.string().optional(),

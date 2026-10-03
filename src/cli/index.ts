@@ -107,8 +107,8 @@ question.command('list <goalId>').option('--open', 'pending only')
   .action((goalId, o) => run(() => out(questions.listQuestions(db(), goalId, { open: o.open }))));
 goal.command('start <id>').action((id) => run(() => out(goals.startGoal(db(), id))));
 goal.command('block <id> <reason>').action((id, reason) => run(() => out(goals.blockGoal(db(), id, reason))));
-goal.command('complete <id>').option('--force')
-  .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force }))));
+goal.command('complete <id>').option('--force').option('--reason <text>')
+  .action((id, o) => run(() => out(goals.completeGoal(db(), id, { force: o.force, reason: o.reason }))));
 goal.command('resume <id>').description('Full resume state + next recommended action (§72)')
   .action((id) => run(() => out(resumeGoal(db(), id))));
 
@@ -258,11 +258,12 @@ const verifyCmd = program.command('verify');
 verifyCmd.command('add').requiredOption('-g, --goal <goalId>')
   .option('-r, --requirement <id>').option('--type <verificationType>')
   .option('--command <cmd>').option('--expected <text>').option('--actual <text>')
-  .option('--passed').option('--failed')
+  .option('--passed').option('--failed').option('--verdict <verdict>', 'verified|partial|failed')
   .action((o) => run(() => {
-    if (o.passed === o.failed) throw new Error('Specify exactly one of --passed or --failed');
+    if (!o.verdict && o.passed === o.failed) throw new Error('Specify exactly one of --passed or --failed, or --verdict');
+    if (o.verdict && (o.passed || o.failed)) throw new Error('Use --verdict alone, not with --passed/--failed');
     out(recordVerification(db(), {
-      passed: Boolean(o.passed), goalId: o.goal,
+      passed: o.verdict ? undefined : Boolean(o.passed), verdict: o.verdict, goalId: o.goal,
       requirementId: o.requirement ? Number(o.requirement) : undefined,
       verificationType: o.type, command: o.command,
       expectedResult: o.expected, actualResult: o.actual,

@@ -27,7 +27,7 @@ describe('goal resume (§72)', () => {
     expect(state.nextRecommendedAction).toBe(`Work on ${b.id}: Frontend`);
     // finish everything: recommendation flips to completion
     updateWorkUnit(db, b.id, { status: 'COMPLETED' });
-    recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id });
+    recordVerification(db, { passed: true, goalId: g.id, requirementId: r.id, verificationType: 'test', actualResult: 'observed in test' });
     expect(resumeGoal(db, g.id).nextRecommendedAction).toBe('All criteria passed — complete the goal');
   });
 

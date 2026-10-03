@@ -48,7 +48,7 @@ describe('brain CLI end-to-end', () => {
     expect(rec.model).toBe('haiku');
 
     brain('work', 'update', wu.id, '--status', 'COMPLETED');
-    brain('goal', 'requirement', 'status', String(r.id), 'PASSED');
+    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--verdict', 'verified', '--type', 'test', '--actual', 'observed');
     const done = brain('goal', 'complete', g.id);
     expect(done.status).toBe('COMPLETED');
   });
@@ -86,7 +86,7 @@ describe('brain CLI end-to-end', () => {
     const w2 = brain('work', 'create', g.id, 'Do e2e', '--serves', String(r.id));
     brain('goal', 'start', g.id);
     brain('work', 'update', w2.id, '--status', 'COMPLETED');
-    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--passed', '--command', 'true');
+    brain('verify', 'add', '-g', g.id, '-r', String(r.id), '--verdict', 'verified', '--type', 'test', '--actual', 'observed', '--command', 'true');
     const state = brain('goal', 'resume', g.id);
     expect(state.requirements[0].status).toBe('PASSED');
     expect(state.nextRecommendedAction).toBe('All criteria passed — complete the goal');

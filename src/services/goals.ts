@@ -3,6 +3,7 @@ import type { BrainDb } from '../db/connection.js';
 import { goals, goalRequirements, goalQuestions, observations, workUnits, workUnitRequirements } from '../db/schema.js';
 import { nextGoalId } from '../ids.js';
 import { addDecision } from './decisions.js';
+import { convergeGoal } from './converge.js';
 import { isStale } from './activity.js';
 import { coverageFindings, COVERAGE_CATEGORIES, lockFindings, uncoveredCategories, principleFindings, VERIFY_METHODS, type ReqRow } from './contract-rules.js';
 import { principleAckRows, principleRows } from './principle-rows.js';
@@ -279,10 +280,26 @@ export function blockGoal(db: BrainDb, id: string, reason: string): Goal {
   return setStatus(db, id, 'BLOCKED');
 }
 
-export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean } = {}): Goal {
+export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean; reason?: string } = {}): Goal {
   const g = getGoal(db, id);
   if (TERMINAL_STATUSES.includes(g.status)) throw new Error(`Goal ${id} is ${g.status}; cannot complete.`);
-  if (!opts.force) {
+  if (opts.force && !opts.reason?.trim()) throw new Error('Force-completing requires a reason (recorded as a decision).');
+  const report = convergeGoal(db, id);
+  const snapshot = JSON.stringify(report);
+  if (opts.force) {
+    addDecision(db, {
+      goalId: id, decision: `Force-completed ${id}`, riskLevel: 'MEDIUM', reversible: true,
+      reason: `${opts.reason!.trim()} | open findings: ${report.findings.map(f => f.id).join(', ') || 'none'}`,
+    });
+    return setStatus(db, id, 'COMPLETED', { completedAt: now(), completionMode: 'forced', convergeSnapshot: snapshot });
+  }
+  if (g.rulesVersion >= 1) {
+    const blocking = report.findings.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH');
+    if (blocking.length > 0) {
+      throw new IncompleteCriteriaError(`Cannot complete ${id}; not converged (§64): ` +
+        blocking.map(f => `[${f.severity}] ${f.message}`).join('; '));
+    }
+  } else {
     const unmet = listRequirements(db, id).filter(r =>
       r.requirementType === 'success_criterion' && r.priority === 'required' &&
       !['PASSED', 'NOT_APPLICABLE'].includes(r.status));
@@ -292,5 +309,5 @@ export function completeGoal(db: BrainDb, id: string, opts: { force?: boolean } 
         unmet.map(r => `#${r.id} ${r.description} [${r.status}]`).join('; '));
     }
   }
-  return setStatus(db, id, 'COMPLETED', { completedAt: now() });
+  return setStatus(db, id, 'COMPLETED', { completedAt: now(), completionMode: 'normal', convergeSnapshot: snapshot });
 }

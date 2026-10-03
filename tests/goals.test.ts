@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createTestDb, makeLockable, makeStartable } from './helpers.js';
+import { createTestDb, makeLockable, makeStartable, satisfyCriteria } from './helpers.js';
+import { updateWorkUnit } from '../src/services/work.js';
 import {
   createGoal, getGoal, listGoals, currentGoal, addRequirement,
   setRequirementStatus, lockGoal, startGoal, blockGoal, completeGoal,
@@ -36,10 +37,11 @@ describe('goals service', () => {
     const r = addRequirement(db, g.id, { type: 'success_criterion', description: 'tests pass', verifyMethod: 'test' });
     makeLockable(db, g.id);
     lockGoal(db, g.id);
-    makeStartable(db, g.id);
+    const wu = makeStartable(db, g.id);
     startGoal(db, g.id);
     expect(() => completeGoal(db, g.id)).toThrow(/tests pass/);
-    setRequirementStatus(db, r.id, 'PASSED');
+    updateWorkUnit(db, wu.id, { status: 'COMPLETED' });
+    satisfyCriteria(db, g.id);
     expect(completeGoal(db, g.id).status).toBe('COMPLETED');
   });
 
@@ -73,7 +75,7 @@ describe('goals service', () => {
       .toThrow(/invalid/i);
     makeLockable(db, g.id);
     lockGoal(db, g.id);
-    completeGoal(db, g.id, { force: true });
+    completeGoal(db, g.id, { force: true, reason: 'test' });
     expect(() => blockGoal(db, g.id, 'late block')).toThrow(/cannot/i);
   });
 });
