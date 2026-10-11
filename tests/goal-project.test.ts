@@ -146,11 +146,13 @@ describe('review fixes', () => {
     const sibling = createGoal(db, { title: 'sib', objective: 'Edit /home/u/Projects/marketing/x and /home/u/Projects/market-old/y' });
     const both = createGoal(db, { title: 'both', objective: 'Touch /home/u/Projects/market/a and /home/u/Projects/central-brain/b' });
     const sentence = createGoal(db, { title: 'end', objective: 'Work in /home/u/Projects/market.' });
+    const nested = createGoal(db, { title: 'other tree', objective: 'Copy /backup/home/u/Projects/market/x' });
     const dry = inferGoalProjects(db, { dryRun: true });
     const byGoal = new Map(dry.linked.map(l => [l.goalId, l.projectId]));
     expect(byGoal.has(sibling.id)).toBe(false);
     expect(byGoal.has(both.id)).toBe(false);
     expect(byGoal.get(sentence.id)).toBe(market.id);
+    expect(byGoal.has(nested.id)).toBe(false);
     void brain;
   });
 

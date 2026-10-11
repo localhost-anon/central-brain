@@ -108,7 +108,7 @@ function inferOne(db: BrainDb, goalId: string, all: Project[]): InferredLink | n
     if (!p.rootPath) continue;
     const root = resolveRoot(p.rootPath);
     const forms = [root, root.startsWith(home + path.sep) ? `~${root.slice(home.length)}` : null].filter(Boolean) as string[];
-    if (forms.some(f => new RegExp(`${escapeRe(f)}(?![\\w-]|\\.\\w)`).test(text))) hits.push({ p, root });
+    if (forms.some(f => new RegExp(`(?<![\\w./~-])${escapeRe(f)}(?![\\w-]|\\.\\w)`).test(text))) hits.push({ p, root });
   }
   const leaves = hits.filter(h => !hits.some(o => o !== h && within(o.root, h.root) && o.root !== h.root));
   if (leaves.length === 1) return { goalId, projectId: leaves[0]!.p.id, reason: 'path' };
