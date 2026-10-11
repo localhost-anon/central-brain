@@ -7,6 +7,10 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { openDb, migrateDb, pendingMigrations, packageRoot, snapshotDir, SCHEMA_NOTICE } from '../src/db/connection.js';
 import { getContext } from '../src/services/context.js';
 
+/** Journal entries after 0004: what a pre-0005 DB still has to apply. */
+const AFTER_0004 = (JSON.parse(fs.readFileSync(path.join(packageRoot(), 'drizzle', 'meta', '_journal.json'), 'utf8'))
+  .entries as { idx: number }[]).filter(e => e.idx > 4).length;
+
 /** Build a file-backed DB with only migrations 0000..0004 applied (the real pre-0005 schema). */
 function preUpgradeDb(): { dir: string; dbPath: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-partial-'));
@@ -29,7 +33,7 @@ describe('pre-0005 schema (C1)', () => {
   it('getContext returns the schema notice instead of throwing', () => {
     const { dbPath } = preUpgradeDb();
     const db = openDb(dbPath);
-    expect(pendingMigrations(db)).toBe(1);
+    expect(pendingMigrations(db)).toBe(AFTER_0004);
     const ctx = getContext(db) as any;
     expect(ctx.schemaPending).toBe(true);
     expect(ctx.notice).toBe(SCHEMA_NOTICE);
@@ -42,7 +46,7 @@ describe('pre-0005 schema (C1)', () => {
       { env: { ...process.env, BRAIN_DB: dbPath }, encoding: 'utf8' }));
     expect(out.schemaPending).toBe(true);
     expect(out.notice).toMatch(/brain migrate/);
-    expect(pendingMigrations(openDb(dbPath))).toBe(1);
+    expect(pendingMigrations(openDb(dbPath))).toBe(AFTER_0004);
   });
 });
 
@@ -52,7 +56,7 @@ describe('pending migrations by hash (C2)', () => {
     const db = openDb(dbPath);
     // A migration from an unmerged branch: applied, but not in our journal. Timestamp before 0005.
     db.$client.prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('f0reign', 1790541302429)").run();
-    expect(pendingMigrations(db)).toBe(1);
+    expect(pendingMigrations(db)).toBe(AFTER_0004);
     const backups = snapshotDir(db);
     expect(fs.existsSync(backups)).toBe(false);
     migrateDb(db);

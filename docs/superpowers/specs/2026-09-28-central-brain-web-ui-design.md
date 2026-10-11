@@ -89,7 +89,7 @@ brain ui ── src/web/server.ts ──┬── Brain services (goals, questio
 
 ## 7. Out of scope
 
-Editing a locked contract; multiple users or login; network access beyond localhost; phone push notifications; charts; running workers on other machines.
+Editing a locked contract; multiple users or login; network access beyond localhost (since added by phase 1, `2026-10-11-brain-ui-phase-1-remote-access-design.md`); phone push notifications; charts; running workers on other machines.
 
 ## 8. Testing & verification
 

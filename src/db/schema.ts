@@ -71,6 +71,11 @@ export const approvals = sqliteTable('approvals', {
   status: text('status').notNull().default('pending'),
   requestedAt: text('requested_at').notNull(),
   resolvedAt: text('resolved_at'),
+  runId: text('run_id'),
+  requestId: text('request_id'),
+  toolName: text('tool_name'),
+  requestJson: text('request_json'),
+  note: text('note'),
 });
 
 export const workUnits = sqliteTable('work_units', {
@@ -263,3 +268,25 @@ export const goalPrincipleAcks = sqliteTable('goal_principle_acks', {
   decisionId: integer('decision_id'),
   createdAt: text('created_at').notNull(),
 }, (t) => [primaryKey({ columns: [t.goalId, t.knowledgeId] })]);
+
+export const workerRuns = sqliteTable('worker_runs', {
+  id: text('id').primaryKey(),
+  goalId: text('goal_id').notNull().references(() => goals.id),
+  sessionId: text('session_id'),
+  status: text('status').notNull().default('queued'),
+  cwd: text('cwd').notNull(),
+  pid: integer('pid'),
+  exitReason: text('exit_reason'),
+  createdAt: text('created_at').notNull(),
+  startedAt: text('started_at'),
+  endedAt: text('ended_at'),
+});
+
+export const workerEvents = sqliteTable('worker_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: text('run_id').notNull().references(() => workerRuns.id),
+  ts: text('ts').notNull(),
+  kind: text('kind').notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail'),
+});

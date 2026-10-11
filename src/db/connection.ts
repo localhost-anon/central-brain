@@ -50,15 +50,26 @@ function appliedHashes(db: BrainDb): Set<string> {
  * Counting by hash rather than row count means an applied migration from another branch
  * cannot mask one of ours that is still pending.
  */
-export function pendingMigrations(db: BrainDb): number {
+interface JournalMigration { tag: string; when: number; sql: string; hash: string }
+
+function journalMigrations(): JournalMigration[] {
   const folder = migrationsFolder();
   const journal = JSON.parse(fs.readFileSync(path.join(folder, 'meta', '_journal.json'), 'utf8')) as
-    { entries: { tag: string }[] };
-  const applied = appliedHashes(db);
-  return journal.entries.filter(e => {
+    { entries: { tag: string; when: number }[] };
+  return journal.entries.map(e => {
     const sql = fs.readFileSync(path.join(folder, `${e.tag}.sql`)).toString();
-    return !applied.has(crypto.createHash('sha256').update(sql).digest('hex'));
-  }).length;
+    return { tag: e.tag, when: e.when, sql, hash: crypto.createHash('sha256').update(sql).digest('hex') };
+  });
+}
+
+/** Journal migrations whose SQL hash is not recorded in __drizzle_migrations (drizzle stores sha256 of the file). */
+function unappliedMigrations(db: BrainDb): JournalMigration[] {
+  const applied = appliedHashes(db);
+  return journalMigrations().filter(m => !applied.has(m.hash));
+}
+
+export function pendingMigrations(db: BrainDb): number {
+  return unappliedMigrations(db).length;
 }
 
 export const SCHEMA_NOTICE = 'Brain schema update pending — run `brain migrate`';
@@ -84,4 +95,14 @@ export function migrateDb(db: BrainDb): void {
     backupDb(db, snapshotDir(db));
   }
   migrate(db, { migrationsFolder: migrationsFolder() });
+  // drizzle skips any migration whose journal `when` is older than the newest applied row. A branch
+  // migration merged with an older timestamp (0006, web-ui) would never apply; apply such gaps here.
+  const gaps = unappliedMigrations(db);
+  if (gaps.length === 0) return;
+  db.$client.transaction(() => {
+    for (const m of gaps) {
+      for (const stmt of m.sql.split('--> statement-breakpoint')) if (stmt.trim()) db.$client.exec(stmt);
+      db.$client.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(m.hash, m.when);
+    }
+  })();
 }
