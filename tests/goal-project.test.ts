@@ -131,3 +131,42 @@ describe('goal create surfaces auto-link from the working folder (criterion 257)
     expect(cli(tmp, 'goal', 'set-project', g.id, 'none')).toBeNull();
   }, 60000);
 });
+
+describe('review fixes', () => {
+  it('projectForPath expands a ~ root_path and compares resolved lengths', async () => {
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const db = createTestDb();
+    const p = addProject(db, { name: 'tilde', rootPath: '~/Projects/tilde' });
+    expect(projectForPath(db, path.join(os.homedir(), 'Projects/tilde/src'))?.id).toBe(p.id);
+  });
+
+  it('inference matches a contract path only on a boundary and leaves unrelated roots unassigned', () => {
+    const { db, market, brain } = seed();
+    const sibling = createGoal(db, { title: 'sib', objective: 'Edit /home/u/Projects/marketing/x and /home/u/Projects/market-old/y' });
+    const both = createGoal(db, { title: 'both', objective: 'Touch /home/u/Projects/market/a and /home/u/Projects/central-brain/b' });
+    const sentence = createGoal(db, { title: 'end', objective: 'Work in /home/u/Projects/market.' });
+    const dry = inferGoalProjects(db, { dryRun: true });
+    const byGoal = new Map(dry.linked.map(l => [l.goalId, l.projectId]));
+    expect(byGoal.has(sibling.id)).toBe(false);
+    expect(byGoal.has(both.id)).toBe(false);
+    expect(byGoal.get(sentence.id)).toBe(market.id);
+    void brain;
+  });
+
+  it('MCP brain_goal_create with an unknown project fails and creates no goal', async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { buildServer } = await import('../src/mcp/server.js');
+    const { listGoals } = await import('../src/services/goals.js');
+    const db = createTestDb();
+    const server = buildServer(db);
+    const client = new Client({ name: 't', version: '0' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    const res = (await client.callTool({ name: 'brain_goal_create', arguments: { title: 'x', objective: 'o', project: 'typo' } })) as any;
+    expect(res.isError).toBe(true);
+    expect(listGoals(db)).toHaveLength(0);
+    await client.close();
+  });
+});

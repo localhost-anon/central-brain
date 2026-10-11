@@ -53,6 +53,7 @@ export function buildServer(db: BrainDb): McpServer {
     project: z.string().optional(),
   }, (a) => {
     const { project, ...input } = a;
+    if (project) projects.getProject(db, project); // an unknown project fails before a goal is created
     const g = goals.createGoal(db, input);
     // The MCP server runs in the Claude session's working folder (stdio, one per session).
     return { ...g, project: goalProjects.linkGoalToCwd(db, g.id, { cwd: process.cwd(), project }) };

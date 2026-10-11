@@ -47,15 +47,21 @@ export function setGoalProject(db: BrainDb, goalId: string, projectIdOrName: str
 
 const within = (p: string, root: string) => p === root || p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
 
+/** A stored root_path as an absolute folder: expands a leading `~`. root_path is stored as given. */
+export function resolveRoot(root: string): string {
+  return path.resolve(root === '~' || root.startsWith('~/') ? path.join(os.homedir(), root.slice(1)) : root);
+}
+
 /** Registered project whose root_path is the longest prefix of `p` (on a path-segment boundary). */
 export function projectForPath(db: BrainDb, p: string): Project | null {
   const abs = path.resolve(p);
-  let best: Project | null = null;
+  let best: { proj: Project; root: string } | null = null;
   for (const proj of listProjects(db)) {
-    if (!proj.rootPath || !within(abs, path.resolve(proj.rootPath))) continue;
-    if (!best || proj.rootPath.length > best.rootPath!.length) best = proj;
+    if (!proj.rootPath) continue;
+    const root = resolveRoot(proj.rootPath);
+    if (within(abs, root) && (!best || root.length > best.root.length)) best = { proj, root };
   }
-  return best;
+  return best?.proj ?? null;
 }
 
 /** Link a just-created goal: an explicit project wins, else the project of `cwd`. Returns the link or null. */
@@ -93,15 +99,20 @@ function inferOne(db: BrainDb, goalId: string, all: Project[]): InferredLink | n
   const g = getGoal(db, goalId);
   const text = goalText(db, goalId);
 
-  // 1. Project folders named in the contract (absolute or ~/ form) — the strongest signal; longest root wins.
+  // 1. Project folders named in the contract (absolute or ~/ form) — the strongest signal. A folder
+  //    matches only on a path boundary ("/x/foo" does not match "/x/foo-repo"). A nested root beats
+  //    its ancestor; two unrelated roots are a tie and give no link.
   const home = os.homedir();
-  let pathHit: Project | null = null;
+  const hits: { p: Project; root: string }[] = [];
   for (const p of all) {
     if (!p.rootPath) continue;
-    const forms = [p.rootPath, p.rootPath.startsWith(home) ? `~${p.rootPath.slice(home.length)}` : null].filter(Boolean) as string[];
-    if (forms.some(f => text.includes(f)) && (!pathHit || p.rootPath.length > pathHit.rootPath!.length)) pathHit = p;
+    const root = resolveRoot(p.rootPath);
+    const forms = [root, root.startsWith(home + path.sep) ? `~${root.slice(home.length)}` : null].filter(Boolean) as string[];
+    if (forms.some(f => new RegExp(`${escapeRe(f)}(?![\\w-]|\\.\\w)`).test(text))) hits.push({ p, root });
   }
-  if (pathHit) return { goalId, projectId: pathHit.id, reason: 'path' };
+  const leaves = hits.filter(h => !hits.some(o => o !== h && within(o.root, h.root) && o.root !== h.root));
+  if (leaves.length === 1) return { goalId, projectId: leaves[0]!.p.id, reason: 'path' };
+  if (leaves.length > 1) return null;
 
   // 2. Project-scoped Brain records written for this goal.
   const scoped = [

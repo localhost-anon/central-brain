@@ -12,6 +12,8 @@ const sideSearch = document.getElementById('side-search');
 
 let current = { page: 'home', goalId: null, project: 'all' };
 let reloadTimer = null;
+let renderSeq = 0;               // a render writes the view only if no newer render started
+const stale = seq => seq !== renderSeq;
 let allGoals = [];
 let needsCount = 0;
 
@@ -125,7 +127,7 @@ function goalRow(g) {
     </span></a></li>`;
 }
 
-async function renderHome() {
+async function renderHome(seq) {
   const filter = sessionStorage.filter || 'active';
   const q = sessionStorage.q || '';
   sideSearch.value = q;
@@ -133,6 +135,7 @@ async function renderHome() {
   if (current.project !== 'all') params.set('project', current.project);
   if (q) params.set('q', q);
   const [rowsAll] = await Promise.all([api(`/api/goals${params.size ? `?${params}` : ''}`), loadGoals()]);
+  if (stale(seq)) return;
   scopeTitle.textContent = projectName(current.project);
   const rows = rowsAll.filter(g => filter === 'all' ? true : filter === 'done' ? TERMINAL.includes(g.status)
     : filter === 'needs' ? waits(g) > 0 : !TERMINAL.includes(g.status));
@@ -145,8 +148,8 @@ async function renderHome() {
     ${q ? `<p class="hint" style="text-align:left">Matching “${esc(q)}”. <button class="link-btn" id="clear-q">Clear search</button></p>` : ''}
     ${rows.length ? `<ul class="goal-list">${rows.map(goalRow).join('')}</ul>`
       : `<p class="empty">No ${filter === 'all' ? '' : esc(FILTERS.find(f => f[0] === filter)[1].toLowerCase())} goals here. <a href="${newHref}">Start a new goal</a></p>`}`;
-  view.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { sessionStorage.filter = b.dataset.filter; renderHome(); }));
-  document.getElementById('clear-q')?.addEventListener('click', () => { sessionStorage.q = ''; renderHome(); });
+  view.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { sessionStorage.filter = b.dataset.filter; refresh(); }));
+  document.getElementById('clear-q')?.addEventListener('click', () => { sessionStorage.q = ''; refresh(); });
 }
 
 // ---------- needs you: every question and approval across goals ----------
@@ -180,8 +183,9 @@ function bindApprovals() {
   });
 }
 
-async function renderNeeds() {
+async function renderNeeds(seq) {
   const [needs] = await Promise.all([api('/api/needs-you'), loadGoals()]);
+  if (stale(seq)) return;
   scopeTitle.textContent = 'Needs you';
   const byGoal = new Map();
   for (const q of needs.questions) { const e = byGoal.get(q.goalId) ?? { title: q.goalTitle, n: 0 }; e.n++; byGoal.set(q.goalId, e); }
@@ -196,8 +200,9 @@ async function renderNeeds() {
 }
 
 // ---------- new goal: composer ----------
-async function renderNew(preProject) {
+async function renderNew(seq, preProject) {
   const [projects] = await Promise.all([api('/api/projects'), loadGoals()]);
+  if (stale(seq)) return;
   scopeTitle.textContent = 'New goal';
   const pre = preProject && projects.some(p => p.id === preProject) ? preProject : '';
   view.innerHTML = `<div class="composer-wrap">
@@ -253,8 +258,9 @@ function thread(items) {
   }).join('');
 }
 
-async function renderGoal(id) {
+async function renderGoal(seq, id) {
   const [d, projects] = await Promise.all([api(`/api/goals/${encodeURIComponent(id)}`), api('/api/projects'), loadGoals()]);
+  if (stale(seq)) return;
   const g = d.goal;
   scopeTitle.textContent = d.project?.name ?? 'Unassigned';
   const run = d.runs[0];
@@ -355,15 +361,16 @@ async function renderGoal(id) {
 }
 
 // ---------- routing + live updates ----------
+const decode = v => { try { return decodeURIComponent(v); } catch { return v; } };
 function route() {
   const h = location.hash || '#/';
   const goal = h.match(/^#\/goal\/(.+)$/);
   const proj = h.match(/^#\/p\/([^?]+)/);
   const nw = h.match(/^#\/new(?:\?project=(.+))?$/);
-  if (goal) current = { ...current, page: 'goal', goalId: decodeURIComponent(goal[1]) };
-  else if (nw) current = { ...current, page: 'new', goalId: null, newProject: nw[1] ? decodeURIComponent(nw[1]) : '' };
+  if (goal) current = { ...current, page: 'goal', goalId: decode(goal[1]) };
+  else if (nw) current = { ...current, page: 'new', goalId: null, newProject: nw[1] ? decode(nw[1]) : '' };
   else if (h === '#/needs') current = { ...current, page: 'needs', goalId: null };
-  else current = { ...current, page: 'home', goalId: null, project: proj ? decodeURIComponent(proj[1]) : (sessionStorage.project || 'all') };
+  else current = { ...current, page: 'home', goalId: null, project: proj ? decode(proj[1]) : (sessionStorage.project || 'all') };
   if (current.page === 'home') sessionStorage.project = current.project;
   document.getElementById('stale').hidden = true;
   refresh();
@@ -371,10 +378,12 @@ function route() {
 
 function refresh() {
   document.getElementById('stale').hidden = true;
-  const p = current.page === 'goal' ? renderGoal(current.goalId)
-    : current.page === 'new' ? renderNew(current.newProject)
-    : current.page === 'needs' ? renderNeeds() : renderHome();
+  const seq = ++renderSeq;
+  const p = current.page === 'goal' ? renderGoal(seq, current.goalId)
+    : current.page === 'new' ? renderNew(seq, current.newProject)
+    : current.page === 'needs' ? renderNeeds(seq) : renderHome(seq);
   p.then(renderSidebar).catch(e => {
+    if (stale(seq)) return;
     view.innerHTML = `<p class="empty">${esc(e.message)}. <a href="#/">Back to goals</a></p>`;
   });
 }

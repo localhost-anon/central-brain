@@ -8,7 +8,7 @@ import { createGoal, getGoal, listGoals, listRequirements, openMaterialQuestions
 import { hybridSearch } from '../services/hybrid-search.js';
 import { buildIntakeReport } from '../services/intake.js';
 import { getProject, listProjects } from '../services/projects.js';
-import { goalProject, goalProjectMap, setGoalProject } from '../services/goal-project.js';
+import { goalProject, goalProjectMap, resolveRoot, setGoalProject } from '../services/goal-project.js';
 import { answerQuestion, dismissQuestion, getQuestion, listQuestions } from '../services/questions.js';
 import { search } from '../services/search.js';
 import { listVerifications } from '../services/verification.js';
@@ -137,7 +137,7 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
       if (typeof b.projectId === 'string' && b.projectId) {
         const proj = listProjects(ctx.db).find(x => x.id === b.projectId);
         if (!proj) throw new HttpError(400, `Unknown project: ${b.projectId}`);
-        if (proj.rootPath) cwd = proj.rootPath;
+        if (proj.rootPath) cwd = resolveRoot(proj.rootPath);
       }
       const goal = createGoal(ctx.db, { title, objective });
       if (typeof b.projectId === 'string' && b.projectId) setGoalProject(ctx.db, goal.id, b.projectId);
@@ -190,7 +190,7 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
       const b = await readJson(req);
       const goal = goalOr404(ctx.db, g[1]!);
       // Workers run in the goal's project folder when it has one.
-      const root = (() => { const pr = goalProject(ctx.db, goal.id); return pr ? getProject(ctx.db, pr.id).rootPath : null; })();
+      const root = (() => { const pr = goalProject(ctx.db, goal.id); const r = pr ? getProject(ctx.db, pr.id).rootPath : null; return r ? resolveRoot(r) : null; })();
       let out: unknown;
       if (b.action === 'start') out = ctx.workers.start(goal.id, root ? { cwd: root } : {});
       else if (b.action === 'resume') out = ctx.workers.resume(goal.id);

@@ -85,6 +85,7 @@ goal.command('create <title>').option('-o, --objective <text>')
   .option('--project <idOrName>', 'project (default: the registered project of the current folder)')
   .action((title, o) => run(() => {
     const d = db();
+    if (o.project) projects.getProject(d, o.project); // an unknown project fails before a goal is created
     const g = goals.createGoal(d, { title, objective: o.objective ?? title, riskLevel: o.risk, autonomyLevel: o.autonomy, complexity: o.complexity });
     out({ ...g, project: goalProjects.linkGoalToCwd(d, g.id, { cwd: process.cwd(), project: o.project }) });
   }));
