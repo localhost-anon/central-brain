@@ -64,7 +64,7 @@ describe('worker manager', () => {
   it('completes when a turn ends with the goal COMPLETED', async () => {
     const { db, m } = setup('stall');
     const g = createGoal(db, { title: 't', objective: 'o' });
-    makeLockable(db, g.id); lockGoal(db, g.id); completeGoal(db, g.id, { force: true });
+    makeLockable(db, g.id); lockGoal(db, g.id); completeGoal(db, g.id, { force: true, reason: 'test setup' });
     const run = m.start(g.id);
     await waitFor(() => getRun(db, run.id).status === 'completed');
     expect(getRun(db, run.id).endedAt).not.toBeNull();
@@ -197,7 +197,7 @@ describe('worker manager', () => {
   it('stop() on a completed run leaves it completed', async () => {
     const { db, m } = setup('stall');
     const g = createGoal(db, { title: 't', objective: 'o' });
-    makeLockable(db, g.id); lockGoal(db, g.id); completeGoal(db, g.id, { force: true });
+    makeLockable(db, g.id); lockGoal(db, g.id); completeGoal(db, g.id, { force: true, reason: 'test setup' });
     const run = m.start(g.id);
     await waitFor(() => getRun(db, run.id).status === 'completed');
     expect(m.stop(run.id).status).toBe('completed');
