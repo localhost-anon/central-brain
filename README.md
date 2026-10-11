@@ -114,8 +114,37 @@ create → intake → lock → plan (work units) → start → work → verify �
 | `embed` | `reindex` (local ONNX embeddings; all searches are hybrid FTS + vector) |
 | `import` | `claude-mem` (one-time, idempotent) |
 | `model` | `recommend` (model tier for a goal); `bin/brain-claude` launches Claude Code with it |
+| `ui` | `ui [--host --port --allow-ip]`, `ui install-agent [--dry-run]`, `ui uninstall-agent`, `ui agent-status` |
 
 The MCP server exposes the same operations as `brain_*` tools. Examples include `brain_goal_intake`, `brain_goal_converge`, `brain_principle_ack` and `brain_failure_solution_add`. Their descriptions carry the rules above, so sessions learn them from the tool list.
+
+## Web UI and phone access
+
+`brain ui` starts a web UI. It lists goals, shows each goal's contract and live timeline, lets you answer worker questions and approve actions, and launches a headless Claude worker per goal.
+
+The UI listens on `127.0.0.1:4410`. It also listens on the Mac's LAN address, `192.168.70.50` by default, while that address exists on a local interface. It never listens on `0.0.0.0`.
+
+**Reach it from a phone.** Turn Tailscale on in the phone and route the LAN subnet (`192.168.70.0/24`) through a subnet router. Then open `http://192.168.70.50:4410`.
+
+**Source-IP allowlist.** Only these addresses can connect:
+
+| Address | Why |
+|---|---|
+| `127.0.0.1` | localhost |
+| `192.168.70.50` | the Mac itself |
+| `192.168.70.122` | the Tailscale subnet router, which phone traffic arrives from |
+
+Every other address gets `403`, and `~/.central-brain/logs/ui.log` records it as `refused <ip> …`. If the phone is refused, add the IP from that log line with `--allow-ip`.
+
+Configure it with `--host <ip|none>`, `--port <n>` and `--allow-ip <ip>` (repeatable; replaces the default list), or with the env vars `BRAIN_UI_HOST`, `BRAIN_UI_PORT` and `BRAIN_UI_ALLOW_IPS`.
+
+> **No login.** Anything that can connect from an allowed address can launch auto-mode Claude workers on the Mac. The allowlist is the only gate.
+
+**Keep it running.** `brain ui install-agent` installs a launchd agent that starts `brain ui` at login and restarts it if it stops. The agent runs under `caffeinate -s`, so the Mac does not sleep while on AC power. Check it with `brain ui agent-status`, and remove it with `brain ui uninstall-agent`.
+
+Install the agent from the checkout you run day to day, because the plist stores absolute paths to `node` and `dist/`. After you upgrade Node, run `install-agent` again.
+
+A MacBook still sleeps when you close the lid. To keep it awake with the lid closed, run `sudo pmset -a disablesleep 1` yourself, and use `sudo pmset -a disablesleep 0` to undo it. Brain never runs sudo.
 
 ## Data and safety
 
