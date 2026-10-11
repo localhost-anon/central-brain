@@ -29,6 +29,8 @@ import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
 import { convergeGoal } from '../services/converge.js';
 import * as principles from '../services/principles.js';
+import { resolveUiConfig } from '../web/config.js';
+import { agentStatus, buildPlist, agentEnv, defaultAgentPaths, installAgent, uninstallAgent } from '../web/agent.js';
 
 function db(opts: { migrate?: boolean } = {}): BrainDb {
   const handle = openDb();
@@ -305,9 +307,15 @@ modelCmd.command('recommend').description('Recommend a Claude model (§12.1)')
   }))));
 
 // ---- web UI ----
-program.command('ui').description('Start the Brain web UI on 127.0.0.1 (launches Claude workers)')
-  .option('--port <n>', 'port', '4410').option('--no-open', 'do not open the browser')
+const collect = (v: string, acc: string[] = []) => [...acc, v];
+const uiCmd = program.command('ui')
+  .description('Start the Brain web UI on 127.0.0.1 and the LAN IP (launches Claude workers)')
+  .option('--port <n>', 'port (default 4410, env BRAIN_UI_PORT)')
+  .option('--host <ip>', 'LAN address to also listen on, or "none" (default 192.168.70.50, env BRAIN_UI_HOST)')
+  .option('--allow-ip <ip>', 'source IP allowed to connect; repeatable; replaces the default list (env BRAIN_UI_ALLOW_IPS)', collect)
+  .option('--no-open', 'do not open the browser')
   .action((o) => runAsync(async () => {
+    const cfg = resolveUiConfig({ port: o.port, host: o.host, allowIp: o.allowIp });
     const d = db();
     let ui: Awaited<ReturnType<typeof startUiServer>> | null = null;
     const manager = new WorkerManager(d, {
@@ -322,15 +330,33 @@ program.command('ui').description('Start the Brain web UI on 127.0.0.1 (launches
     });
     const feed = new ChangeFeed(d);
     const server = ui = await startUiServer({
-      db: d, workers: manager, feed, embedder, port: Number(o.port),
+      db: d, workers: manager, feed, embedder, port: cfg.port, host: cfg.host, allowIps: cfg.allowIps,
       webRoot: path.join(packageRoot(), 'web'), defaultCwd: path.join(os.homedir(), 'Projects'),
     });
     feed.start();
-    out({ url: server.url });
+    out({ url: server.url, lanUrl: server.lanUrl(), lanHost: cfg.host, allowIps: cfg.allowIps });
     if (o.open && process.platform === 'darwin') spawn('open', [server.url], { stdio: 'ignore', detached: true }).unref();
     const shutdown = async () => { manager.stopAll(); feed.stop(); await server.close(); process.exit(0); };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
   }));
+
+const agentOptions = (c: typeof uiCmd) => c
+  .option('--port <n>', 'port (default 4410)')
+  .option('--host <ip>', 'LAN address, or "none" (default 192.168.70.50)')
+  .option('--allow-ip <ip>', 'source IP allowed to connect; repeatable', collect);
+agentOptions(uiCmd.command('install-agent')
+  .description('Install a launchd agent that keeps `brain ui` running under caffeinate -s (idempotent)'))
+  .option('--dry-run', 'print the plist instead of installing it')
+  .action((o) => run(() => {
+    const cfg = resolveUiConfig({ port: o.port, host: o.host, allowIp: o.allowIp });
+    const paths = defaultAgentPaths(packageRoot());
+    if (o.dryRun) { process.stdout.write(buildPlist(cfg, paths, agentEnv())); return; }
+    out({ ...installAgent(cfg, paths), ...agentStatus() });
+  }));
+uiCmd.command('uninstall-agent').description('Stop and remove the launchd agent')
+  .action(() => run(() => out(uninstallAgent(defaultAgentPaths(packageRoot())))));
+uiCmd.command('agent-status').description('launchd state of the brain ui agent')
+  .action(() => run(() => out(agentStatus())));
 
 await program.parseAsync();

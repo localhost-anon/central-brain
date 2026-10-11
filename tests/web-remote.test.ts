@@ -87,3 +87,20 @@ describe('LAN listener lifecycle (criterion 237)', () => {
     expect(logs.some(l => l.startsWith('LAN listener up'))).toBe(true);
   });
 });
+
+describe('launchd agent (criterion 239, dry run)', () => {
+  it('install-agent --dry-run prints a valid plist running brain ui under caffeinate -s with KeepAlive', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const plist = execFileSync('npx', ['tsx', 'src/cli/index.ts', 'ui', 'install-agent', '--dry-run', '--allow-ip', '192.168.70.122'],
+      { encoding: 'utf8' });
+    expect(plist).toContain('<string>/usr/bin/caffeinate</string>\n    <string>-s</string>');
+    expect(plist).toContain('<key>KeepAlive</key><true/>');
+    expect(plist).toContain('<key>RunAtLoad</key><true/>');
+    expect(plist).toMatch(/<string>\/[^<]*\/dist\/cli\/index\.js<\/string>/);
+    expect(plist).toContain('<string>192.168.70.122</string>');
+    expect(plist).toContain('<key>PATH</key>');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'brain-plist-')), 'a.plist');
+    fs.writeFileSync(file, plist);
+    if (process.platform === 'darwin') execFileSync('/usr/bin/plutil', ['-lint', file]);
+  });
+});
