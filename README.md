@@ -122,6 +122,12 @@ The MCP server exposes the same operations as `brain_*` tools. Examples include 
 
 `brain ui` starts a web UI. It lists goals, shows each goal's contract and live timeline, lets you answer worker questions and approve actions, and launches a headless Claude worker per goal.
 
+**Projects.** The sidebar groups goals by project. On a phone, the ☰ button opens it as a drawer. A goal's project is set in these ways:
+
+- A goal that you create through MCP or `brain goal create` links to the registered project that contains the current folder. `--project <name>` overrides it.
+- You can change the project with the picker on the goal page, or with `brain goal set-project <id> <project|none>`.
+- `brain project infer-goals [--dry-run]` links existing goals once. It uses paths in the contract, project-scoped records, the worker's folder, or a project name in the title. It never changes an existing link, and it leaves unclear goals in "Unassigned".
+
 The UI listens on `127.0.0.1:4410`. It also listens on the Mac's **Tailscale IP**, `100.92.71.97` by default, while that address exists on a local interface (Tailscale is up). It never listens on `0.0.0.0`.
 
 **Reach it from a phone.** Turn Tailscale on in the phone and open `http://100.92.71.97:4410`. Use the IP: the Host check accepts IP addresses only, not the MagicDNS name. The phone connects to the Mac directly over the tailnet, with no subnet router in the path, so it works on any network.
