@@ -70,13 +70,16 @@ export function goalDetail(db: BrainDb, id: string) {
   const runs = listRuns(db, id);
   const events = runs[0] ? listEvents(db, runs[0].id, { limit: 200 }) : [];
   const approvals = db.select().from(approvalsTable).where(eq(approvalsTable.goalId, id)).orderBy(desc(approvalsTable.id)).all();
-  const t: { ts: string; kind: string; text: string }[] = [
+  const t: { ts: string; kind: string; text: string; answer?: string | null; note?: string | null }[] = [
     { ts: goal.createdAt, kind: 'goal', text: 'Goal created' },
     ...(goal.lockedAt ? [{ ts: goal.lockedAt, kind: 'goal', text: 'Contract locked' }] : []),
     ...(goal.startedAt ? [{ ts: goal.startedAt, kind: 'goal', text: 'Execution started' }] : []),
     ...(goal.completedAt ? [{ ts: goal.completedAt, kind: 'goal', text: 'Goal completed' }] : []),
-    ...questions.map(q => ({ ts: q.createdAt, kind: 'question', text: `Asked: ${q.question}` })),
-    ...questions.filter(q => q.answeredAt).map(q => ({ ts: q.answeredAt!, kind: 'answer', text: `Answered: ${q.answer}` })),
+    // A question carries its answer, so the thread shows them together.
+    ...questions.map(q => ({
+      ts: q.createdAt, kind: 'question', text: q.question, answer: q.answer ?? null,
+      note: q.status === 'dismissed' ? `Dismissed: ${q.statusReason ?? ''}` : null,
+    })),
     ...decisions.map(d => ({ ts: d.createdAt, kind: 'decision', text: d.decision })),
     ...fails.map(f => ({ ts: f.createdAt, kind: 'failure', text: f.errorMessage ?? 'Failure' })),
     ...verifications.map(v => ({ ts: v.createdAt, kind: v.passed ? 'verified' : 'verify-failed', text: v.actualResult ?? v.command ?? 'Verification' })),

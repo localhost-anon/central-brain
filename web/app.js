@@ -25,7 +25,7 @@ const RUN_LABEL = {
   stopped: 'Worker stopped', completed: 'Worker finished', failed: 'Worker failed',
 };
 const STATUS_LABEL = {
-  DRAFT: 'Draft', LOCKED: 'Ready', PLANNING: 'Planning', EXECUTING: 'Running', VERIFYING: 'Verifying',
+  DRAFT: 'Draft', LOCKED: 'Ready', PLANNING: 'Planning', EXECUTING: 'In progress', VERIFYING: 'Verifying',
   BLOCKED: 'Blocked', COMPLETED: 'Done', FAILED: 'Failed', CANCELLED: 'Cancelled',
 };
 const FILTERS = [['active', 'Active'], ['needs', 'Needs you'], ['done', 'Done'], ['all', 'All']];
@@ -237,15 +237,17 @@ async function renderNew(seq, preProject) {
 // ---------- goal detail: header, what waits on you, contract, thread ----------
 function threadItem(t) {
   const text = esc(t.text);
-  if (t.kind === 'answer') return `<div class="msg me"><span class="who">You</span>${esc(t.text.replace(/^Answered: /, ''))}</div>`;
-  if (t.kind === 'question') return `<div class="msg worker"><span class="who">Question</span>${esc(t.text.replace(/^Asked: /, ''))}</div>`;
-  if (t.kind.startsWith('worker-')) {
-    if (/assistant|text|message/.test(t.kind)) return `<div class="msg worker"><span class="who">Worker</span>${text}</div>`;
-    return `<div class="event"><time>${esc(clock(t.ts))}</time>${text}</div>`;
+  if (t.kind === 'question') {
+    const reply = t.answer ? `<div class="reply"><span class="who">You</span>${esc(t.answer)}</div>`
+      : t.note ? `<div class="reply muted">${esc(t.note)}</div>`
+      : '<div class="reply wait">Waiting for your answer</div>';
+    return `<div class="msg worker qa"><span class="who">Question</span>${text}${reply}</div>`;
   }
+  if (t.kind.startsWith('worker-') && /assistant|text|message/.test(t.kind)) return `<div class="msg worker"><span class="who">Worker</span>${text}</div>`;
+  if (t.kind === 'goal' || t.kind.startsWith('worker-')) return `<div class="event"><time>${esc(clock(t.ts))}</time>${text}</div>`;
   const cls = t.kind === 'failure' || t.kind === 'verify-failed' ? 'bad' : t.kind === 'verified' ? 'ok' : '';
-  const pre = t.kind === 'decision' ? 'Decided: ' : t.kind === 'verified' ? 'Verified: ' : t.kind === 'failure' ? 'Failed: ' : '';
-  return `<div class="event ${cls}"><time>${esc(clock(t.ts))}</time>${esc(pre)}${text}</div>`;
+  const tag = { decision: 'Decided', verified: 'Verified', failure: 'Failed', 'verify-failed': 'Check failed' }[t.kind] ?? '';
+  return `<button type="button" class="note ${cls}" aria-expanded="false"><span class="tag">${esc(tag)}<time>${esc(clock(t.ts))}</time></span><span class="body">${text}</span></button>`;
 }
 
 function thread(items) {
@@ -323,6 +325,9 @@ async function renderGoal(seq, id) {
       refresh();
     } catch (err) { toast(err.message, 'bad'); }
   });
+  view.querySelectorAll('.note').forEach(n => n.addEventListener('click', () => {
+    n.setAttribute('aria-expanded', String(n.getAttribute('aria-expanded') !== 'true'));
+  }));
   view.querySelectorAll('[data-worker]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     try { await api(`/api/goals/${encodeURIComponent(g.id)}/worker`, { action: b.dataset.worker }); refresh(); }

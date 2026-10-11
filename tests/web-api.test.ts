@@ -7,7 +7,7 @@ import { createTestDb } from './helpers.js';
 import { fakeEmbedder } from '../src/services/embedder.js';
 import { addProject } from '../src/services/projects.js';
 import { createGoal } from '../src/services/goals.js';
-import { listQuestions } from '../src/services/questions.js';
+import { listQuestions, addQuestion, answerQuestion, dismissQuestion } from '../src/services/questions.js';
 import { createRun, createPermissionApproval } from '../src/services/workers.js';
 import { startUiServer } from '../src/web/server.js';
 import { goalProject, setGoalProject } from '../src/services/goal-project.js';
@@ -100,6 +100,23 @@ describe('web API', () => {
     expect(d.json.timeline.some((t: any) => t.kind === 'goal' && t.text.includes('created'))).toBe(true);
     expect((await req('GET', '/api/goals/nope')).status).toBe(404);
     expect((await req('GET', '/api/goals/%E0%A4%A')).status).toBe(404);
+  });
+
+  it('puts each answer on its question in the timeline, with no separate answer item', async () => {
+    const { db, req } = await boot();
+    const g = createGoal(db, { title: 'Q', objective: 'o' });
+    const a = addQuestion(db, g.id, { question: 'Which colour?' });
+    const b = addQuestion(db, g.id, { question: 'Which size?' });
+    const c = addQuestion(db, g.id, { question: 'Which font?' });
+    answerQuestion(db, a.id, 'Blue');
+    dismissQuestion(db, b.id, 'not needed');
+    const t = (await req('GET', `/api/goals/${g.id}`)).json.timeline;
+    const qs = t.filter((x: any) => x.kind === 'question');
+    expect(qs.find((x: any) => x.text === 'Which colour?')).toMatchObject({ answer: 'Blue', note: null });
+    expect(qs.find((x: any) => x.text === 'Which size?')).toMatchObject({ answer: null, note: 'Dismissed: not needed' });
+    expect(qs.find((x: any) => x.text === 'Which font?')).toMatchObject({ answer: null, note: null });
+    expect(t.some((x: any) => x.kind === 'answer')).toBe(false);
+    void c;
   });
 
   it('filters goals by project and names the project on each row (criterion 256)', async () => {
