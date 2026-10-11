@@ -9,6 +9,7 @@ import {
 import { WorkerManager } from '../workers/manager.js';
 import { ChangeFeed } from '../web/change-feed.js';
 import { startUiServer } from '../web/server.js';
+import { Notifier, loadNtfyConfig, ntfySender, NTFY_CONFIG_PATH } from '../web/notifier.js';
 import { backupDb } from '../db/backup.js';
 import * as goals from '../services/goals.js';
 import * as work from '../services/work.js';
@@ -347,6 +348,12 @@ const uiCmd = program.command('ui')
       webRoot: path.join(packageRoot(), 'web'), defaultCwd: path.join(os.homedir(), 'Projects'),
     });
     manager.recoverStale(); // only after the port is ours (a losing second instance exits above)
+    const uiLog = (m: string) => console.error(`[brain ui] ${m}`);
+    const ntfy = loadNtfyConfig();
+    if (ntfy) {
+      new Notifier(d, ntfySender(ntfy), ntfy.uiUrl, uiLog).attach(feed);
+      uiLog(`notifier on: topic "${ntfy.topic}" at ${ntfy.url}`);
+    } else uiLog(`notifier off: no ${NTFY_CONFIG_PATH}`);
     feed.start();
     out({ url: server.url, lanUrl: server.lanUrl(), lanHost: cfg.host, allowIps: cfg.allowIps });
     if (o.open && process.platform === 'darwin') spawn('open', [server.url], { stdio: 'ignore', detached: true }).unref();

@@ -152,6 +152,27 @@ Install the agent from the checkout you run day to day, because the plist stores
 
 A MacBook still sleeps when you close the lid. To keep it awake with the lid closed, run `sudo pmset -a disablesleep 1` yourself, and use `sudo pmset -a disablesleep 0` to undo it. Brain never runs sudo.
 
+**Phone pushes (ntfy).** `brain ui` sends a push to a self-hosted [ntfy](https://ntfy.sh) server when:
+
+| Event | Priority |
+|---|---|
+| A worker waits for your answers or an approval | high |
+| A worker finished | normal |
+| A worker failed | high |
+| A goal completed (also from terminal sessions) | normal |
+
+A push shows the project, the goal title and the reason. It never shows question text, paths or logs. Tap it to open the goal. State that exists when the UI starts sends nothing, and a stopped worker sends nothing.
+
+The notifier reads `~/.central-brain/ntfy.json` (keep it mode 600; it holds the token):
+
+```json
+{ "url": "http://100.95.99.70:2586", "topic": "brain", "token": "tk_…", "uiUrl": "http://100.92.71.97:4410" }
+```
+
+Without the file, the notifier is off and `ui.log` says `notifier off`. If ntfy is unreachable, the UI keeps running and logs `push failed`. There are no retries. Restart the agent after you change the file (`brain ui install-agent`).
+
+On the phone, install the ntfy app, add the server URL, log in, and subscribe to the topic. The server in this setup is on the tailnet only, so pushes arrive while Tailscale is on.
+
 ## Data and safety
 
 - **Location.** The database is at `~/.central-brain/brain.db`. Override it with `BRAIN_DB`. The database never lives in the repo.
