@@ -154,9 +154,16 @@ describe('launchd agent (criterion 239, dry run)', () => {
     expect(plist).toContain('<key>RunAtLoad</key><true/>');
     expect(plist).toMatch(/<string>\/[^<]*\/dist\/cli\/index\.js<\/string>/);
     expect(plist).toContain('<string>192.168.70.122</string>');
+    expect(plist).not.toContain('<string>100.80.228.70</string>'); // explicit --allow-ip replaced the defaults (not swallowed by `ui`)
     expect(plist).toContain('<key>PATH</key>');
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'brain-plist-')), 'a.plist');
     fs.writeFileSync(file, plist);
     if (process.platform === 'darwin') execFileSync('/usr/bin/plutil', ['-lint', file]);
+  });
+});
+
+describe('phase 1b defaults (decision 42)', () => {
+  it('listen on the Mac tailnet IP and allow only localhost, the Mac and the phone', () => {
+    expect(UI_DEFAULTS).toEqual({ port: 4410, host: '100.92.71.97', allowIps: ['127.0.0.1', '100.92.71.97', '100.80.228.70'] });
   });
 });

@@ -110,3 +110,16 @@ They are overridable by CLI flags and by the env vars `BRAIN_UI_HOST`, `BRAIN_UI
 ## 6. Out of scope (later phases)
 
 Mobile layout and notifications (phase 2), chat with workers (phase 3), diffs and merges (phase 4), login and HTTPS (declined for now, decision 38), and moving to TrueNAS.
+
+## 7. Addendum — phase 1b: Tailscale IP instead of the LAN IP (2026-10-11)
+
+**User decision 42 (GOAL-2026-0070).** Reaching the Mac by its LAN IP needed the `truenas-scale` subnet router in the path. The router rewrote every phone request to TrueNAS's address, so the allowlist could only say "anything behind TrueNAS". The UI now listens on the Mac's own Tailscale IP instead, and the phone connects directly.
+
+| | Phase 1 (above) | Phase 1b (current) |
+|---|---|---|
+| URL | `http://192.168.70.50:4410` | `http://100.92.71.97:4410` |
+| Path | phone → tailnet → TrueNAS subnet router → LAN → Mac | phone → tailnet → Mac |
+| Allowlist | `127.0.0.1`, `.50`, `192.168.70.122` | `127.0.0.1`, `100.92.71.97`, `100.80.228.70` (S25 Ultra) |
+| Works when | the Mac is on the `.70` LAN and TrueNAS is up | Tailscale is up on both devices |
+
+The design in §3 is unchanged: listening only while the address exists, guard order, and the launchd agent. Only the defaults in `src/web/config.ts` changed. Phase-1 criteria 240 and 241, which were LAN-path checks, are superseded by GOAL-2026-0070's tailnet checks.
