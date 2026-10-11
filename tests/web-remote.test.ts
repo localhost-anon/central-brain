@@ -45,6 +45,12 @@ describe('ui config', () => {
     expect(resolveUiConfig({}, { BRAIN_UI_PORT: '5000' }).port).toBe(5000);
   });
 
+  it('rejects empty or malformed IPs so no entry can match an unknown peer', () => {
+    expect(() => resolveUiConfig({ allowIp: [''] }, {})).toThrow(/Invalid --allow-ip/);
+    expect(() => resolveUiConfig({}, { BRAIN_UI_ALLOW_IPS: 'x.y' })).toThrow(/Invalid --allow-ip/);
+    expect(() => resolveUiConfig({ host: 'mac.local' }, {})).toThrow(/Invalid --host/);
+  });
+
   it('normalises IPv4-mapped IPv6 addresses', () => {
     expect(normaliseIp('::ffff:192.168.70.122')).toBe('192.168.70.122');
     expect(normaliseIp('::1')).toBe('::1');
@@ -85,6 +91,56 @@ describe('LAN listener lifecycle (criterion 237)', () => {
     await new Promise(r => setTimeout(r, 120));
     expect(s.lanUrl()).toBe(`http://[::1]:${s.port}`);
     expect(logs.some(l => l.startsWith('LAN listener up'))).toBe(true);
+  });
+});
+
+describe('LAN listener hardening', () => {
+  const lanGet = (port: number, p: string) => new Promise<number>((resolve, reject) => {
+    const r = http.request({ host: '::1', port, path: p, headers: { host: `[::1]:${port}` } }, res => { res.resume(); resolve(res.statusCode!); });
+    r.on('error', reject); r.end();
+  });
+
+  it('gates requests arriving on the LAN listener itself by source IP', async () => {
+    const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-web-'));
+    fs.writeFileSync(path.join(webRoot, 'index.html'), 'x');
+    const mk = (allowIps: string[]) => startUiServer({
+      db: createTestDb(), workers: noWorkers, embedder: () => fakeEmbedder(), port: 0, webRoot, defaultCwd: '/tmp',
+      host: '::1', allowIps, interfaces: () => ['127.0.0.1', '::1'], log: () => {},
+    });
+    const refused = await mk(['127.0.0.1']); closers.push(refused.close);
+    await new Promise(r => setTimeout(r, 50));
+    expect(await lanGet(refused.port, '/')).toBe(403);
+    const allowed = await mk(['127.0.0.1', '::1']); closers.push(allowed.close);
+    await new Promise(r => setTimeout(r, 50));
+    expect(await lanGet(allowed.port, '/')).toBe(200);
+  });
+
+  it('closes the LAN listener when the address goes away', async () => {
+    let present = true;
+    const { s, logs } = await boot({ host: '::1', interfaces: () => (present ? ['127.0.0.1', '::1'] : ['127.0.0.1']), recheckMs: 20 });
+    await new Promise(r => setTimeout(r, 60));
+    expect(s.lanUrl()).not.toBeNull();
+    present = false;
+    await new Promise(r => setTimeout(r, 80));
+    expect(s.lanUrl()).toBeNull();
+    expect(logs).toContain('LAN address ::1 not present; serving localhost only');
+  });
+
+  it('answers 500 and keeps serving when a route throws outside the API handler', async () => {
+    const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-web-'));
+    fs.writeFileSync(path.join(webRoot, 'index.html'), 'x');
+    const db = createTestDb();
+    const logs: string[] = [];
+    const s = await startUiServer({ db, workers: noWorkers, embedder: () => fakeEmbedder(), port: 0, webRoot, defaultCwd: '/tmp', log: m => logs.push(m) });
+    closers.push(s.close);
+    const get = (p: string) => new Promise<number>((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: s.port, path: p, headers: { host: `127.0.0.1:${s.port}` } }, res => { res.resume(); resolve(res.statusCode!); });
+      r.on('error', reject); r.end();
+    });
+    db.$client.close(); // /api/events reads needsYou() before streaming: it now throws
+    expect(await get('/api/events')).toBe(500);
+    expect(logs.some(l => l.startsWith('request failed: GET /api/events'))).toBe(true);
+    expect(await get('/')).toBe(200); // the process is still up
   });
 });
 

@@ -77,7 +77,14 @@ export function installAgent(cfg: UiConfig, p: AgentPaths): { plist: string; log
   fs.mkdirSync(path.dirname(p.log), { recursive: true });
   bootout();
   fs.writeFileSync(p.plist, buildPlist(cfg, p, agentEnv()));
-  launchctl('bootstrap', domain(), p.plist);
+  // bootout returns before launchd has fully torn the old service down; an immediate bootstrap
+  // can fail with "5: Input/output error", so retry briefly.
+  for (let attempt = 1; ; attempt++) {
+    try { launchctl('bootstrap', domain(), p.plist); break; } catch (e) {
+      if (attempt >= 10) throw e;
+      execFileSync('/bin/sleep', ['0.5']);
+    }
+  }
   return { plist: p.plist, log: p.log };
 }
 

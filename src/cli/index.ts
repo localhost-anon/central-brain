@@ -333,6 +333,7 @@ const uiCmd = program.command('ui')
       db: d, workers: manager, feed, embedder, port: cfg.port, host: cfg.host, allowIps: cfg.allowIps,
       webRoot: path.join(packageRoot(), 'web'), defaultCwd: path.join(os.homedir(), 'Projects'),
     });
+    manager.recoverStale(); // only after the port is ours (a losing second instance exits above)
     feed.start();
     out({ url: server.url, lanUrl: server.lanUrl(), lanHost: cfg.host, allowIps: cfg.allowIps });
     if (o.open && process.platform === 'darwin') spawn('open', [server.url], { stdio: 'ignore', detached: true }).unref();

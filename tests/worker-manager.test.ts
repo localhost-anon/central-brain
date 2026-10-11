@@ -135,13 +135,16 @@ describe('worker manager', () => {
     expect(sent().filter(s => s.argv)[1].argv.slice(-2)).toEqual(['--resume', 'fake-session-1']);
   });
 
-  it('on construction, orphaned active runs become stopped/resumable (Review Focus 2)', () => {
+  it('recoverStale(), not construction, makes orphaned active runs stopped/resumable (Review Focus 2)', () => {
     const db = createTestDb();
     const g = createGoal(db, { title: 't', objective: 'o' });
     const r = createRun(db, { goalId: g.id, cwd: '/tmp' });
     updateRun(db, r.id, { status: 'working', sessionId: 's-9' });
+    // A second `brain ui` that loses the port race constructs a manager too: that alone must not touch live runs.
     const m = new WorkerManager(db, { command: [process.execPath, FAKE], defaultCwd: os.tmpdir() });
     managers.push(m);
+    expect(getRun(db, r.id).status).toBe('working');
+    m.recoverStale();
     expect(getRun(db, r.id)).toMatchObject({ status: 'stopped', exitReason: 'server restarted' });
   });
 

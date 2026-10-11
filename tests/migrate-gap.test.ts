@@ -33,7 +33,9 @@ describe('migrateDb applies journal entries drizzle skipped', () => {
     const db = openDb(dbWithout0006());
     expect(tables(db)).not.toContain('worker_runs');
     expect(pendingMigrations(db)).toBe(1);
+    const backups = path.join(path.dirname(db.$client.name), 'backups');
     migrateDb(db);
+    expect(fs.readdirSync(backups).length).toBe(1); // snapshot taken before the gap was applied
     expect(tables(db)).toEqual(expect.arrayContaining(['worker_runs', 'worker_events']));
     expect((db.$client.prepare('PRAGMA table_info(approvals)').all() as { name: string }[]).map(c => c.name)).toContain('run_id');
     expect(pendingMigrations(db)).toBe(0);

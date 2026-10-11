@@ -39,30 +39,40 @@ const TYPES: Record<string, string> = {
 };
 
 export async function startUiServer(opts: UiServerOptions) {
+  const log = opts.log ?? ((m: string) => console.error(`[brain ui] ${m}`));
   const clients = new Set<http.ServerResponse>();
   let port = opts.port;
   const broadcast = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const c of clients) c.write(frame);
   };
+  // Called from the change feed and worker events: a DB hiccup (e.g. SQLITE_BUSY) must not crash the 24/7 server.
   const announce = (goalId: string) => {
-    broadcast('goal-changed', { goalId });
-    broadcast('needs-you', { count: needsYou(opts.db).count });
+    try {
+      broadcast('goal-changed', { goalId });
+      broadcast('needs-you', { count: needsYou(opts.db).count });
+    } catch (e) { log(`announce failed: ${(e as Error).message}`); }
   };
   opts.feed?.on('goal-changed', (goalId: string) => announce(goalId));
 
-  const log = opts.log ?? ((m: string) => console.error(`[brain ui] ${m}`));
-  const allowIps = new Set((opts.allowIps ?? ['127.0.0.1']).map(normaliseIp));
+  const allowIps = new Set((opts.allowIps ?? ['127.0.0.1']).map(normaliseIp).filter(Boolean));
   allowIps.add('127.0.0.1');
   const lanHost = opts.host ?? null;
   const lastRefusal = new Map<string, number>();
 
   // Guard order: source IP (LAN safeguard), Host (DNS rebinding), Origin on writes (cross-site requests).
-  const handler: http.RequestListener = async (req, res) => {
+  const handler: http.RequestListener = (req, res) => {
+    route(req, res).catch((e) => {
+      log(`request failed: ${req.method} ${req.url}: ${(e as Error).message}`);
+      if (!res.headersSent) res.writeHead(500).end('Internal error'); else res.destroy();
+    });
+  };
+  const route = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const peer = normaliseIp((opts.remoteAddressOf ?? (r => r.socket.remoteAddress))(req));
     if (!allowIps.has(peer)) {
       const now = Date.now();
       if (now - (lastRefusal.get(peer) ?? 0) >= REFUSAL_LOG_MS) {
+        for (const [ip, t] of lastRefusal) if (now - t >= REFUSAL_LOG_MS) lastRefusal.delete(ip); // bounded under LAN scans
         lastRefusal.set(peer, now);
         log(`refused ${peer || 'unknown'} ${req.method} ${req.url}`);
       }
@@ -76,8 +86,9 @@ export async function startUiServer(opts: UiServerOptions) {
     }
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     if (req.method === 'GET' && url.pathname === '/api/events') {
+      const count = needsYou(opts.db).count; // before the headers, so a DB error can still answer 500
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-      res.write(`event: needs-you\ndata: ${JSON.stringify({ count: needsYou(opts.db).count })}\n\n`);
+      res.write(`event: needs-you\ndata: ${JSON.stringify({ count })}\n\n`);
       clients.add(res);
       const beat = setInterval(() => res.write(': ping\n\n'), 25_000);
       req.on('close', () => { clearInterval(beat); clients.delete(res); });
@@ -91,7 +102,7 @@ export async function startUiServer(opts: UiServerOptions) {
       res.writeHead(404).end('Not found'); return;
     }
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
-    fs.createReadStream(file).pipe(res);
+    fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
   };
 
   const server = http.createServer(handler);
@@ -112,10 +123,10 @@ export async function startUiServer(opts: UiServerOptions) {
     if (present && !lan) {
       const s = http.createServer(handler);
       lan = s;
-      s.once('error', (e) => { lan = null; s.close(); setLanState('error', `LAN listener on ${hostPort(lanHost, port)} failed: ${(e as Error).message}`); });
+      s.on('error', (e) => { if (lan === s) lan = null; s.close(); setLanState('error', `LAN listener on ${hostPort(lanHost, port)} failed: ${(e as Error).message}`); });
       s.listen(port, lanHost, () => setLanState('up', `LAN listener up on http://${hostPort(lanHost, port)}`));
     } else if (!present) {
-      if (lan) { lan.close(); lan = null; }
+      if (lan) { lan.close(); lan.closeAllConnections(); lan = null; }
       setLanState('absent', `LAN address ${lanHost} not present; serving localhost only`);
     }
   };

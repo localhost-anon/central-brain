@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 /**
  * Phone-access defaults (phase 1, Brain decisions 37–39): the Mac's fixed LAN IP and the
  * only sources allowed to connect — localhost, the Mac itself and the TrueNAS subnet router
@@ -30,5 +32,8 @@ export function resolveUiConfig(
   const host = hostRaw === 'none' || hostRaw === '' ? null : hostRaw;
   const explicit = flags.allowIp?.length ? flags.allowIp : env.BRAIN_UI_ALLOW_IPS ? list(env.BRAIN_UI_ALLOW_IPS) : null;
   const allowIps = explicit ? ['127.0.0.1', ...explicit.map(normaliseIp).filter(ip => ip !== '127.0.0.1')] : [...UI_DEFAULTS.allowIps];
+  // An empty or malformed entry would match an unknown peer (''), so every entry must be a real IP.
+  for (const ip of allowIps) if (!isIP(ip)) throw new Error(`Invalid --allow-ip / BRAIN_UI_ALLOW_IPS entry: "${ip}"`);
+  if (host && !isIP(host)) throw new Error(`Invalid --host / BRAIN_UI_HOST: "${host}" (an IP address or "none")`);
   return { port, host, allowIps };
 }

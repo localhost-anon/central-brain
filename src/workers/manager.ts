@@ -56,7 +56,14 @@ export class WorkerManager implements WorkerControl {
   }) {
     this.command = opts.command ?? ['claude'];
     this.maxWorkers = opts.maxWorkers ?? readMaxWorkers();
-    // Runs left active by a previous server have no process any more: make them resumable.
+  }
+
+  /**
+   * Runs left active by a previous server have no process any more: make them resumable.
+   * Call only once this process owns the UI port — a second `brain ui` that fails to bind
+   * must not mark the running instance's live workers stopped.
+   */
+  recoverStale(): void {
     for (const status of ACTIVE_RUN_STATUSES) {
       for (const r of this.db.$client.prepare('SELECT id FROM worker_runs WHERE status = ?').all(status) as { id: string }[]) {
         this.setStatus(r.id, 'stopped', { exitReason: 'server restarted', endedAt: now() });

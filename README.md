@@ -139,6 +139,8 @@ Every other address gets `403`, and `~/.central-brain/logs/ui.log` records it as
 Configure it with `--host <ip|none>`, `--port <n>` and `--allow-ip <ip>` (repeatable; replaces the default list), or with the env vars `BRAIN_UI_HOST`, `BRAIN_UI_PORT` and `BRAIN_UI_ALLOW_IPS`.
 
 > **No login.** Anything that can connect from an allowed address can launch auto-mode Claude workers on the Mac. The allowlist is the only gate.
+>
+> `192.168.70.122` admits every tailnet device that may use the subnet route, and every TrueNAS container whose traffic is NATed to the host IP. To narrow it without adding a login, use a Tailscale ACL that lets only your phone reach `192.168.70.50:4410`.
 
 **Keep it running.** `brain ui install-agent` installs a launchd agent that starts `brain ui` at login and restarts it if it stops. The agent runs under `caffeinate -s`, so the Mac does not sleep while on AC power. Check it with `brain ui agent-status`, and remove it with `brain ui uninstall-agent`.
 
