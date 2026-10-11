@@ -7,7 +7,8 @@ import { listDecisions } from '../services/decisions.js';
 import { createGoal, getGoal, listGoals, listRequirements, openMaterialQuestions } from '../services/goals.js';
 import { hybridSearch } from '../services/hybrid-search.js';
 import { buildIntakeReport } from '../services/intake.js';
-import { listProjects } from '../services/projects.js';
+import { getProject, listProjects } from '../services/projects.js';
+import { goalProject, goalProjectMap, setGoalProject } from '../services/goal-project.js';
 import { answerQuestion, dismissQuestion, getQuestion, listQuestions } from '../services/questions.js';
 import { search } from '../services/search.js';
 import { listVerifications } from '../services/verification.js';
@@ -45,11 +46,13 @@ function goalOr404(db: BrainDb, id: string) {
 }
 
 export function goalSummaries(db: BrainDb) {
+  const projects = goalProjectMap(db);
   return listGoals(db).map(g => {
     const crit = listRequirements(db, g.id).filter(r => r.requirementType === 'success_criterion' && r.priority === 'required');
     const run = activeRunForGoal(db, g.id) ?? listRuns(db, g.id)[0];
     return {
       id: g.id, title: g.title, status: g.status, riskLevel: g.riskLevel, updatedAt: g.updatedAt,
+      project: projects.get(g.id) ?? null,
       criteria: { passed: crit.filter(r => r.status === 'PASSED').length, total: crit.length },
       openQuestions: TERMINAL.includes(g.status) ? 0 : openMaterialQuestions(db, g.id).length,
       pendingApprovals: pendingApprovals(db, g.id).length,
@@ -81,7 +84,7 @@ export function goalDetail(db: BrainDb, id: string) {
   ];
   t.sort((a, b) => a.ts.localeCompare(b.ts));
   return {
-    goal, requirements: listRequirements(db, id), questions, approvals, decisions, failures: fails,
+    goal, project: goalProject(db, id), requirements: listRequirements(db, id), questions, approvals, decisions, failures: fails,
     verifications, runs, events, timeline: t,
     openQuestions: TERMINAL.includes(goal.status) ? [] : openMaterialQuestions(db, id).map(q => q.id),
   };
@@ -111,6 +114,9 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
       let rows = goalSummaries(ctx.db);
       const status = url.searchParams.get('status');
       if (status) rows = rows.filter(r => r.status === status);
+      // ?project=<id> or ?project=unassigned (goals with no project).
+      const project = url.searchParams.get('project');
+      if (project) rows = rows.filter(r => (project === 'unassigned' ? r.project === null : r.project?.id === project));
       const q = url.searchParams.get('q')?.trim();
       if (q) { const ids = await searchGoalIds(ctx, q); rows = rows.filter(r => ids.has(r.id)); }
       send(res, 200, rows); return true;
@@ -134,6 +140,7 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
         if (proj.rootPath) cwd = proj.rootPath;
       }
       const goal = createGoal(ctx.db, { title, objective });
+      if (typeof b.projectId === 'string' && b.projectId) setGoalProject(ctx.db, goal.id, b.projectId);
       await buildIntakeReport(ctx.db, ctx.embedder(), goal.id);
       // The goal is already committed: a worker launch failure must not surface as a failed
       // create (the UI would retry and duplicate the goal), so report it alongside the 201.
@@ -168,12 +175,24 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
       if (out.goalId) ctx.announce(out.goalId);
       send(res, 200, out); return true;
     }
+    g = m(/^\/api\/goals\/([^/]+)\/project$/);
+    if (req.method === 'POST' && g) {
+      const b = await readJson(req);
+      const goal = goalOr404(ctx.db, g[1]!);
+      if (b.projectId !== null && typeof b.projectId !== 'string') throw new HttpError(400, 'projectId must be a project id or null');
+      if (typeof b.projectId === 'string') { try { getProject(ctx.db, b.projectId); } catch { throw new HttpError(400, `Unknown project: ${b.projectId}`); } }
+      const project = setGoalProject(ctx.db, goal.id, b.projectId === '' ? null : b.projectId);
+      ctx.announce(goal.id);
+      send(res, 200, { goalId: goal.id, project }); return true;
+    }
     g = m(/^\/api\/goals\/([^/]+)\/worker$/);
     if (req.method === 'POST' && g) {
       const b = await readJson(req);
       const goal = goalOr404(ctx.db, g[1]!);
+      // Workers run in the goal's project folder when it has one.
+      const root = (() => { const pr = goalProject(ctx.db, goal.id); return pr ? getProject(ctx.db, pr.id).rootPath : null; })();
       let out: unknown;
-      if (b.action === 'start') out = ctx.workers.start(goal.id);
+      if (b.action === 'start') out = ctx.workers.start(goal.id, root ? { cwd: root } : {});
       else if (b.action === 'resume') out = ctx.workers.resume(goal.id);
       else if (b.action === 'stop') {
         const run = activeRunForGoal(ctx.db, goal.id);

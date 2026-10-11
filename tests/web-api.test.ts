@@ -10,6 +10,7 @@ import { createGoal } from '../src/services/goals.js';
 import { listQuestions } from '../src/services/questions.js';
 import { createRun, createPermissionApproval } from '../src/services/workers.js';
 import { startUiServer } from '../src/web/server.js';
+import { goalProject, setGoalProject } from '../src/services/goal-project.js';
 import type { WorkerControl } from '../src/workers/manager.js';
 
 const closers: (() => Promise<void>)[] = [];
@@ -99,6 +100,46 @@ describe('web API', () => {
     expect(d.json.timeline.some((t: any) => t.kind === 'goal' && t.text.includes('created'))).toBe(true);
     expect((await req('GET', '/api/goals/nope')).status).toBe(404);
     expect((await req('GET', '/api/goals/%E0%A4%A')).status).toBe(404);
+  });
+
+  it('filters goals by project and names the project on each row (criterion 256)', async () => {
+    const { db, req } = await boot();
+    const market = addProject(db, { name: 'market', rootPath: '/Users/x/market' });
+    const brain = addProject(db, { name: 'central-brain', rootPath: '/Users/x/central-brain' });
+    const a = createGoal(db, { title: 'Spread card', objective: 'o' });
+    const b = createGoal(db, { title: 'UI', objective: 'o' });
+    const c = createGoal(db, { title: 'Loose', objective: 'o' });
+    setGoalProject(db, a.id, market.id);
+    setGoalProject(db, b.id, brain.id);
+    const m = (await req('GET', `/api/goals?project=${market.id}`)).json;
+    expect(m.map((x: any) => x.id)).toEqual([a.id]);
+    expect(m[0].project).toEqual({ id: market.id, name: 'market' });
+    expect((await req('GET', '/api/goals?project=unassigned')).json.map((x: any) => x.id)).toEqual([c.id]);
+    expect((await req('GET', '/api/goals')).json).toHaveLength(3);
+    expect((await req('GET', `/api/goals/${a.id}`)).json.project).toEqual({ id: market.id, name: 'market' });
+  });
+
+  it('sets, changes and clears a goal project; rejects unknown projects (criterion 259)', async () => {
+    const { db, req } = await boot();
+    const market = addProject(db, { name: 'market', rootPath: '/Users/x/market' });
+    const g = createGoal(db, { title: 'Spread card', objective: 'o' });
+    const r = await req('POST', `/api/goals/${g.id}/project`, { projectId: market.id });
+    expect(r.status).toBe(200);
+    expect(goalProject(db, g.id)).toEqual({ id: market.id, name: 'market' });
+    expect((await req('POST', `/api/goals/${g.id}/project`, { projectId: 'nope' })).status).toBe(400);
+    expect(goalProject(db, g.id)?.id).toBe(market.id);
+    expect((await req('POST', `/api/goals/${g.id}/project`, { projectId: null })).status).toBe(200);
+    expect(goalProject(db, g.id)).toBeNull();
+    expect((await req('POST', `/api/goals/${g.id}/project`, { projectId: 5 })).status).toBe(400);
+  });
+
+  it('starts a worker in the goal project folder and links the project on create', async () => {
+    const { db, req, calls } = await boot();
+    const market = addProject(db, { name: 'market', rootPath: '/Users/x/market' });
+    const created = (await req('POST', '/api/goals', { title: 'T', objective: 'o', projectId: market.id, startWorker: false })).json;
+    expect(goalProject(db, created.goal.id)?.id).toBe(market.id);
+    await req('POST', `/api/goals/${created.goal.id}/worker`, { action: 'start' });
+    expect(calls).toContainEqual(['start', created.goal.id, { cwd: '/Users/x/market' }]);
   });
 
   it('answer/dismiss call answersUpdated; approvals and worker actions reach the worker control', async () => {
