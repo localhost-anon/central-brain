@@ -24,6 +24,7 @@ import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
 import { convergeGoal } from '../services/converge.js';
 import * as principles from '../services/principles.js';
+import * as goalProjects from '../services/goal-project.js';
 
 export function buildServer(db: BrainDb): McpServer {
   const server = new McpServer({ name: 'central-brain', version: '0.1.0' });
@@ -45,11 +46,18 @@ export function buildServer(db: BrainDb): McpServer {
   const embedder = () => (emb ??= createFastEmbedder());
 
   // goals
-  tool('brain_goal_create', 'Create a new goal (DRAFT)', {
+  tool('brain_goal_create', 'Create a new goal (DRAFT). It is linked to the project whose folder this session runs in; pass project to override', {
     title: z.string(), objective: z.string(),
     riskLevel: z.string().optional(), autonomyLevel: z.string().optional(),
     complexity: z.enum(['trivial', 'low', 'medium', 'high', 'critical']).optional(),
-  }, (a) => goals.createGoal(db, a));
+    project: z.string().optional(),
+  }, (a) => {
+    const { project, ...input } = a;
+    if (project) projects.getProject(db, project); // an unknown project fails before a goal is created
+    const g = goals.createGoal(db, input);
+    // The MCP server runs in the Claude session's working folder (stdio, one per session).
+    return { ...g, project: goalProjects.linkGoalToCwd(db, g.id, { cwd: process.cwd(), project }) };
+  });
   tool('brain_goal_get', 'Get a goal with its requirements', { id: z.string() },
     (a) => ({ ...goals.getGoal(db, a.id), requirements: goals.listRequirements(db, a.id) }));
   tool('brain_goal_list', 'List goals, optionally by status', { status: z.string().optional() },

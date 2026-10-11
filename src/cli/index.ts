@@ -29,6 +29,7 @@ import { buildIntakeReport } from '../services/intake.js';
 import * as questions from '../services/questions.js';
 import { convergeGoal } from '../services/converge.js';
 import * as principles from '../services/principles.js';
+import * as goalProjects from '../services/goal-project.js';
 import { resolveUiConfig } from '../web/config.js';
 import { agentStatus, buildPlist, agentEnv, defaultAgentPaths, installAgent, uninstallAgent } from '../web/agent.js';
 
@@ -81,10 +82,15 @@ const goal = program.command('goal');
 goal.command('create <title>').option('-o, --objective <text>')
   .option('--risk <level>').option('--autonomy <level>')
   .option('--complexity <level>', 'trivial|low|medium|high|critical')
-  .action((title, o) => run(() => out(goals.createGoal(db(), {
-    title, objective: o.objective ?? title, riskLevel: o.risk,
-    autonomyLevel: o.autonomy, complexity: o.complexity,
-  }))));
+  .option('--project <idOrName>', 'project (default: the registered project of the current folder)')
+  .action((title, o) => run(() => {
+    const d = db();
+    if (o.project) projects.getProject(d, o.project); // an unknown project fails before a goal is created
+    const g = goals.createGoal(d, { title, objective: o.objective ?? title, riskLevel: o.risk, autonomyLevel: o.autonomy, complexity: o.complexity });
+    out({ ...g, project: goalProjects.linkGoalToCwd(d, g.id, { cwd: process.cwd(), project: o.project }) });
+  }));
+goal.command('set-project <id> <project>').description('Set the goal\'s project ("none" clears it)')
+  .action((id, project) => run(() => out(goalProjects.setGoalProject(db(), id, project === 'none' ? null : project))));
 goal.command('list').option('--status <status>')
   .action((o) => run(() => out(goals.listGoals(db(), { status: o.status }))));
 goal.command('show <id>').action((id) => run(() => {
@@ -172,6 +178,9 @@ proj.command('add <name>').option('--path <rootPath>').option('-d, --description
   .action((name, o) => run(() => out(projects.addProject(db(), { name, rootPath: o.path, description: o.description }))));
 proj.command('list').action(() => run(() => out(projects.listProjects(db()))));
 proj.command('show <idOrName>').action((idOrName) => run(() => out(projects.getProject(db(), idOrName))));
+proj.command('infer-goals').description('Link goals that have no project to their inferred project (never overwrites)')
+  .option('--dry-run', 'report only')
+  .action((o) => run(() => out(goalProjects.inferGoalProjects(db(), { dryRun: o.dryRun }))));
 proj.command('scan <dir>').description('Discover and register projects under a directory (§54)')
   .action((dir) => run(() => out(scanProjects(db(), dir))));
 

@@ -2,18 +2,36 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#212121" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <title>Central Brain</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top">
-    <a href="#/" class="brand">Central Brain</a>
-    <span id="needs" class="needs" hidden></span>
-    <a href="#/new" class="btn primary">New goal</a>
-  </header>
-  <div id="banner" class="banner" hidden>Disconnected — reconnecting…</div>
-  <main id="view"></main>
+  <div class="shell">
+    <aside id="sidebar" class="sidebar" aria-label="Projects">
+      <div class="side-head">
+        <a href="#/" class="brand">Central Brain</a>
+        <button class="icon-btn only-phone" id="close-side" aria-label="Close menu">✕</button>
+      </div>
+      <a href="#/new" class="new-goal">＋ New goal</a>
+      <input id="side-search" class="side-search" type="search" placeholder="Search goals" autocomplete="off">
+      <nav id="side-nav" class="side-nav"></nav>
+    </aside>
+    <div id="scrim" class="scrim" hidden></div>
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn only-phone" id="open-side" aria-label="Open menu" aria-controls="sidebar">☰</button>
+        <h1 id="scope-title" class="scope-title">Goals</h1>
+        <a href="#/needs" id="needs" class="needs-pill" hidden></a>
+      </header>
+      <div id="banner" class="banner" hidden>Connection lost. Reconnecting…</div>
+      <div id="stale" class="stale" hidden>New activity. <button class="link-btn" id="reload-now">Show it</button></div>
+      <main id="view" class="view"></main>
+    </div>
+  </div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>
