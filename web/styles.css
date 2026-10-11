@@ -143,6 +143,17 @@ details.contract[open] > summary::after { content: "Hide"; }
 .msg.worker { align-self: flex-start; background: transparent; border: 1px solid var(--line); border-top-left-radius: 6px; }
 .msg.me { align-self: flex-end; background: var(--bubble-me); border-top-right-radius: 6px; }
 .msg .who { display: block; font-size: 12px; color: var(--faint); margin-bottom: 2px; }
+.qa .reply { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.qa .reply.muted, .qa .reply.wait { font-size: 13px; color: var(--faint); }
+.qa .reply.wait { color: var(--you); }
+.note { all: unset; box-sizing: border-box; align-self: stretch; display: block; cursor: pointer; padding: 8px 12px; border-left: 3px solid var(--line); font-size: 14px; color: var(--muted); }
+.note.ok { border-left-color: var(--ok); } .note.bad { border-left-color: var(--bad); }
+.note .tag { display: flex; gap: 8px; align-items: baseline; font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+.note.ok .tag { color: var(--ok); } .note.bad .tag { color: var(--bad); }
+.note .tag time { font-weight: 400; color: var(--faint); font-variant-numeric: tabular-nums; }
+.note .body { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.note[aria-expanded="true"] .body { -webkit-line-clamp: unset; display: block; }
+.note:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .event { align-self: center; font-size: 13px; color: var(--muted); text-align: center; max-width: 92%; overflow-wrap: anywhere; }
 .event.bad { color: var(--bad); } .event.ok { color: var(--ok); }
 .event time { color: var(--faint); margin-right: 6px; font-variant-numeric: tabular-nums; }
@@ -180,5 +191,6 @@ details.contract[open] > summary::after { content: "Hide"; }
   .view { padding: 12px 14px calc(40px + env(safe-area-inset-bottom)); }
   .goal-row a { padding: 14px 2px; }
   .msg { max-width: 94%; }
+  .goal-head h2 { font-size: 19px; }
 }
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
