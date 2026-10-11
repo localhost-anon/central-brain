@@ -1,16 +1,16 @@
 import { isIP } from 'node:net';
 
 /**
- * Phone-access defaults (phase 1, Brain decisions 37–39): the Mac's fixed LAN IP and the
- * only sources allowed to connect — localhost, the Mac itself and the TrueNAS subnet router
- * that Tailscale traffic from the phone arrives through.
+ * Phone-access defaults (phase 1b, Brain decision 42): the UI also listens on the Mac's own
+ * Tailscale IP, so the phone connects directly over the tailnet (no subnet router, no SNAT).
+ * Only localhost, the Mac itself and the phone's tailnet IP may connect.
  */
 export interface UiConfig { port: number; host: string | null; allowIps: string[] }
 
 export const UI_DEFAULTS: UiConfig = {
   port: 4410,
-  host: '192.168.70.50',
-  allowIps: ['127.0.0.1', '192.168.70.50', '192.168.70.122'],
+  host: '100.92.71.97', // pankajs-macbook-air
+  allowIps: ['127.0.0.1', '100.92.71.97', '100.80.228.70'], // localhost, the Mac, pankajs-s25-ultra
 };
 
 /** `::ffff:a.b.c.d` (IPv4-mapped IPv6, how node reports IPv4 peers on dual-stack sockets) → `a.b.c.d`. */

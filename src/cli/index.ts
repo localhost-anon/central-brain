@@ -308,10 +308,14 @@ modelCmd.command('recommend').description('Recommend a Claude model (§12.1)')
 
 // ---- web UI ----
 const collect = (v: string, acc: string[] = []) => [...acc, v];
+// install-agent shares --host/--port/--allow-ip with ui: without positional options the parent
+// command swallows them and the plist silently gets the defaults.
+program.enablePositionalOptions();
 const uiCmd = program.command('ui')
+  .enablePositionalOptions()
   .description('Start the Brain web UI on 127.0.0.1 and the LAN IP (launches Claude workers)')
   .option('--port <n>', 'port (default 4410, env BRAIN_UI_PORT)')
-  .option('--host <ip>', 'LAN address to also listen on, or "none" (default 192.168.70.50, env BRAIN_UI_HOST)')
+  .option('--host <ip>', 'extra address to listen on (the Mac\'s Tailscale IP), or "none" (default 100.92.71.97, env BRAIN_UI_HOST)')
   .option('--allow-ip <ip>', 'source IP allowed to connect; repeatable; replaces the default list (env BRAIN_UI_ALLOW_IPS)', collect)
   .option('--no-open', 'do not open the browser')
   .action((o) => runAsync(async () => {
@@ -344,7 +348,7 @@ const uiCmd = program.command('ui')
 
 const agentOptions = (c: typeof uiCmd) => c
   .option('--port <n>', 'port (default 4410)')
-  .option('--host <ip>', 'LAN address, or "none" (default 192.168.70.50)')
+  .option('--host <ip>', 'extra listen address, or "none" (default 100.92.71.97)')
   .option('--allow-ip <ip>', 'source IP allowed to connect; repeatable', collect);
 agentOptions(uiCmd.command('install-agent')
   .description('Install a launchd agent that keeps `brain ui` running under caffeinate -s (idempotent)'))
