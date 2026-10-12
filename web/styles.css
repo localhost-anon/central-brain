@@ -143,6 +143,17 @@ details.contract[open] > summary::after { content: "Hide"; }
 .msg.worker { align-self: flex-start; background: transparent; border: 1px solid var(--line); border-top-left-radius: 6px; }
 .msg.me { align-self: flex-end; background: var(--bubble-me); border-top-right-radius: 6px; }
 .msg .who { display: block; font-size: 12px; color: var(--faint); margin-bottom: 2px; }
+.msg { min-width: 0; }
+.msg .md { white-space: normal; min-width: 0; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre { margin: 0 0 8px; }
+.md ul, .md ol { padding-left: 22px; }
+.md li + li { margin-top: 2px; }
+.md a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--raised); padding: 1px 5px; border-radius: 5px; }
+.md pre { overflow-x: auto; max-width: 100%; white-space: pre; overflow-wrap: normal; background: var(--raised); padding: 10px 12px; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.45; }
+.md pre code { background: none; padding: 0; font-size: inherit; }
 .qa .reply { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 .qa .reply.muted, .qa .reply.wait { font-size: 13px; color: var(--faint); }
 .qa .reply.wait { color: var(--you); }
