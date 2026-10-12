@@ -12,8 +12,8 @@ import { goalProject, goalProjectMap, resolveRoot, setGoalProject } from '../ser
 import { answerQuestion, dismissQuestion, getQuestion, listQuestions } from '../services/questions.js';
 import { search } from '../services/search.js';
 import { listVerifications } from '../services/verification.js';
-import { activeRunForGoal, listEvents, listRuns, pendingApprovals } from '../services/workers.js';
-import type { WorkerControl } from '../workers/manager.js';
+import { activeRunForGoal, listGoalEvents, listRuns, pendingApprovals } from '../services/workers.js';
+import { MAX_MESSAGE_CHARS, type WorkerControl } from '../workers/manager.js';
 
 export interface ApiContext {
   db: BrainDb; workers: WorkerControl; embedder: () => Embedder; defaultCwd: string;
@@ -22,6 +22,7 @@ export interface ApiContext {
 
 class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
+const FULL_TEXT = ['text', 'user'];
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -68,7 +69,7 @@ export function goalDetail(db: BrainDb, id: string) {
   const fails = db.select().from(failures).where(eq(failures.goalId, id)).orderBy(desc(failures.id)).all();
   const verifications = listVerifications(db, { goalId: id });
   const runs = listRuns(db, id);
-  const events = runs[0] ? listEvents(db, runs[0].id, { limit: 200 }) : [];
+  const events = listGoalEvents(db, id, { limit: 200 });
   const approvals = db.select().from(approvalsTable).where(eq(approvalsTable.goalId, id)).orderBy(desc(approvalsTable.id)).all();
   const t: { ts: string; kind: string; text: string; answer?: string | null; note?: string | null }[] = [
     { ts: goal.createdAt, kind: 'goal', text: 'Goal created' },
@@ -83,7 +84,8 @@ export function goalDetail(db: BrainDb, id: string) {
     ...decisions.map(d => ({ ts: d.createdAt, kind: 'decision', text: d.decision })),
     ...fails.map(f => ({ ts: f.createdAt, kind: 'failure', text: f.errorMessage ?? 'Failure' })),
     ...verifications.map(v => ({ ts: v.createdAt, kind: v.passed ? 'verified' : 'verify-failed', text: v.actualResult ?? v.command ?? 'Verification' })),
-    ...events.map(e => ({ ts: e.ts, kind: `worker-${e.kind}`, text: e.summary })),
+    // The user's messages and the worker's text replies show in full; other events keep the one-line summary.
+    ...events.map(e => ({ ts: e.ts, kind: `worker-${e.kind}`, text: FULL_TEXT.includes(e.kind) ? e.detail ?? e.summary : e.summary })),
   ];
   t.sort((a, b) => a.ts.localeCompare(b.ts));
   return {
@@ -202,6 +204,19 @@ export async function handleApi(ctx: ApiContext, req: IncomingMessage, res: Serv
         if (!run) throw new HttpError(409, 'No active worker for this goal');
         out = ctx.workers.stop(run.id);
       } else throw new HttpError(400, 'action must be start, stop or resume');
+      ctx.announce(goal.id);
+      send(res, 200, out); return true;
+    }
+    g = m(/^\/api\/goals\/([^/]+)\/message$/);
+    if (req.method === 'POST' && g) {
+      const b = await readJson(req);
+      const goal = goalOr404(ctx.db, g[1]!);
+      const text = typeof b.text === 'string' ? b.text.trim() : '';
+      if (!text) throw new HttpError(400, 'text is required');
+      if (text.length > MAX_MESSAGE_CHARS) throw new HttpError(400, `text is longer than ${MAX_MESSAGE_CHARS} characters`);
+      const root = (() => { const pr = goalProject(ctx.db, goal.id); const r = pr ? getProject(ctx.db, pr.id).rootPath : null; return r ? resolveRoot(r) : null; })();
+      let out: unknown;
+      try { out = ctx.workers.send(goal.id, text, root ? { cwd: root } : {}); } catch (e) { throw new HttpError(409, (e as Error).message); }
       ctx.announce(goal.id);
       send(res, 200, out); return true;
     }

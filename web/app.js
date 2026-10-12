@@ -243,6 +243,7 @@ function threadItem(t) {
       : '<div class="reply wait">Waiting for your answer</div>';
     return `<div class="msg worker qa"><span class="who">Question</span>${text}${reply}</div>`;
   }
+  if (t.kind === 'worker-user') return `<div class="msg me"><span class="who">You</span>${text}</div>`;
   if (t.kind.startsWith('worker-') && /assistant|text|message/.test(t.kind)) return `<div class="msg worker"><span class="who">Worker</span>${text}</div>`;
   if (t.kind === 'goal' || t.kind.startsWith('worker-')) return `<div class="event"><time>${esc(clock(t.ts))}</time>${text}</div>`;
   const cls = t.kind === 'failure' || t.kind === 'verify-failed' ? 'bad' : t.kind === 'verified' ? 'ok' : '';
@@ -316,7 +317,11 @@ async function renderGoal(seq, id) {
         ${list('Unresolved failures', d.failures.filter(f => !f.resolved), f => esc(f.errorMessage))}
       </div>
     </details>
-    <div class="thread" id="timeline">${thread(d.timeline) || '<p class="empty">Nothing has happened yet.</p>'}</div>`;
+    <div class="thread" id="timeline">${thread(d.timeline) || '<p class="empty">Nothing has happened yet.</p>'}</div>
+    <form class="composer chat" id="chat">
+      <textarea id="chat-text" maxlength="4000" rows="2" placeholder="${active ? 'Message the worker' : 'Message the worker. Sending starts it again.'}" aria-label="Message to the worker"></textarea>
+      <div class="composer-bar"><button class="btn primary" type="submit">Send</button></div>
+    </form>`;
 
   document.getElementById('goal-project').addEventListener('change', async e => {
     try {
@@ -325,6 +330,25 @@ async function renderGoal(seq, id) {
       refresh();
     } catch (err) { toast(err.message, 'bad'); }
   });
+  const chat = document.getElementById('chat');
+  const chatText = document.getElementById('chat-text');
+  const DELIVERY = { sent: 'Sent', queued: 'Sent. The worker reads it when its current step ends.', resumed: 'Sent. The worker is starting again.', started: 'Sent. A worker is starting.' };
+  chat.addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = chatText.value.trim();
+    if (!text) { toast('Type a message first', 'bad'); return; }
+    const btn = chat.querySelector('button');
+    btn.disabled = true;
+    try {
+      const out = await api(`/api/goals/${encodeURIComponent(g.id)}/message`, { text });
+      chatText.value = '';
+      toast(DELIVERY[out.delivery] ?? 'Sent');
+      refresh();
+    } catch (err) { toast(err.message, 'bad'); }
+    btn.disabled = false;
+  });
+  // Cmd/Ctrl+Enter sends on a keyboard; on the phone the Send button does.
+  chatText.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) chat.requestSubmit(); });
   view.querySelectorAll('.note').forEach(n => n.addEventListener('click', () => {
     n.setAttribute('aria-expanded', String(n.getAttribute('aria-expanded') !== 'true'));
   }));
@@ -396,7 +420,7 @@ function refresh() {
 // True while the user has unsent input on the page — a reload would wipe it.
 function hasDraft() {
   if (view.querySelector('input:focus, textarea:focus, select:focus')) return true;
-  return [...view.querySelectorAll('[data-answer], [data-note], [data-reason], #title, #objective')].some(el => el.value.trim() !== '');
+  return [...view.querySelectorAll('[data-answer], [data-note], [data-reason], #title, #objective, #chat-text')].some(el => el.value.trim() !== '');
 }
 
 function markStale() { document.getElementById('stale').hidden = false; }
@@ -434,7 +458,7 @@ function connect() {
     const tl = document.getElementById('timeline');
     if (!tl) return;
     const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 40;
-    tl.insertAdjacentHTML('beforeend', threadItem({ ts: event.ts, kind: `worker-${event.kind}`, text: event.summary }));
+    tl.insertAdjacentHTML('beforeend', threadItem({ ts: event.ts, kind: `worker-${event.kind}`, text: ['text', 'user'].includes(event.kind) ? event.detail ?? event.summary : event.summary }));
     if (atBottom) window.scrollTo({ top: document.body.scrollHeight });
   });
   es.addEventListener('run-changed', e => {

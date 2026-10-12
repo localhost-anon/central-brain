@@ -171,6 +171,17 @@ The notifier reads `~/.central-brain/ntfy.json` (keep it mode 600; it holds the 
 
 Without the file, the notifier is off and `ui.log` says `notifier off`. If ntfy is unreachable, the UI keeps running and logs `push failed`. There are no retries. Restart the agent after you change the file (`brain ui install-agent`).
 
+**Chat with a worker.** Each goal page has a message box under the thread. Type a message and tap Send (Cmd/Ctrl+Enter on a keyboard). Messages are 1 to 4000 characters.
+
+| Worker state | What happens to your message |
+|---|---|
+| Live, between turns | The worker gets it at once. |
+| Mid-turn (working or waiting for an approval) | The worker gets it when the current turn ends. It goes before the automatic "continue" nudge. |
+| Stopped, finished or failed | Brain resumes the last worker session with your message as the first input. |
+| Never started | Brain starts a worker with the goal brief plus your message. |
+
+The thread shows your messages as "You", the worker's full text replies, and tool calls as one-line events. It covers every run of the goal. A message sends no push. When a message cannot reach the worker (the process is gone, or it is still shutting down), the UI shows the error and Brain stores nothing.
+
 On the phone, install the ntfy app, add the server URL, log in, and subscribe to the topic. The server in this setup is on the tailnet only, so pushes arrive while Tailscale is on.
 
 ## Data and safety

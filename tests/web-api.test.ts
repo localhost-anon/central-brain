@@ -8,7 +8,7 @@ import { fakeEmbedder } from '../src/services/embedder.js';
 import { addProject } from '../src/services/projects.js';
 import { createGoal } from '../src/services/goals.js';
 import { listQuestions, addQuestion, answerQuestion, dismissQuestion } from '../src/services/questions.js';
-import { createRun, createPermissionApproval } from '../src/services/workers.js';
+import { addEvent, createRun, createPermissionApproval } from '../src/services/workers.js';
 import { startUiServer } from '../src/web/server.js';
 import { goalProject, setGoalProject } from '../src/services/goal-project.js';
 import type { WorkerControl } from '../src/workers/manager.js';
@@ -24,6 +24,7 @@ function stubWorkers() {
     resume: (...a) => { calls.push(['resume', ...a]); return {} as never; },
     answersUpdated: (...a) => { calls.push(['answersUpdated', ...a]); },
     decide: (...a) => { calls.push(['decide', ...a]); return { id: a[0], status: 'approved' } as never; },
+    send: (...a) => { calls.push(['send', ...a]); return { delivery: 'sent', run: { id: 'RUN-x' } } as never; },
     stopAll: () => { calls.push(['stopAll']); },
   };
   return { w, calls };
@@ -157,6 +158,48 @@ describe('web API', () => {
     expect(goalProject(db, created.goal.id)?.id).toBe(market.id);
     await req('POST', `/api/goals/${created.goal.id}/worker`, { action: 'start' });
     expect(calls).toContainEqual(['start', created.goal.id, { cwd: '/Users/x/market' }]);
+  });
+
+  it('message API: sends trimmed text with the project folder; 400 on empty or over 4000 chars; 409 when the worker refuses (criteria 306, 312)', async () => {
+    let refuse = false;
+    const { db, req, calls } = await boot(w => {
+      const orig = w.send;
+      w.send = (...a) => { if (refuse) throw new Error('Worker for G is still shutting down; try again in a moment.'); return orig(...a); };
+    });
+    addProject(db, { name: 'proj', rootPath: '/tmp/proj' });
+    const g = createGoal(db, { title: 'M', objective: 'o' });
+    setGoalProject(db, g.id, 'proj');
+    expect((await req('POST', `/api/goals/${g.id}/message`, { text: '  hi there ' })).status).toBe(200);
+    expect(calls).toContainEqual(['send', g.id, 'hi there', { cwd: '/tmp/proj' }]);
+    for (const text of ['', '   ', 'x'.repeat(4001), 42]) {
+      expect((await req('POST', `/api/goals/${g.id}/message`, { text })).status).toBe(400);
+    }
+    expect(calls.filter(c => c[0] === 'send')).toHaveLength(1); // refused messages never reach the worker control
+    refuse = true;
+    const r = await req('POST', `/api/goals/${g.id}/message`, { text: 'again' });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toMatch(/still shutting down/);
+    expect((await req('POST', '/api/goals/GOAL-nope/message', { text: 'x' })).status).toBe(404);
+  });
+
+  it('timeline shows user messages and full worker replies in time order (criterion 307)', async () => {
+    const { db, req } = await boot();
+    const g = createGoal(db, { title: 'T', objective: 'o' });
+    const run = createRun(db, { goalId: g.id, cwd: '/tmp' });
+    const long = `Here is the plan. ${'word '.repeat(120)}end.`;
+    addEvent(db, run.id, { kind: 'user', summary: 'What next?', detail: 'What next?' });
+    addEvent(db, run.id, { kind: 'text', summary: long, detail: long });
+    addEvent(db, run.id, { kind: 'tool', summary: 'Bash: ls', detail: '{"command":"ls"}' });
+    const t = (await req('GET', `/api/goals/${g.id}`)).json.timeline.filter((x: any) => x.kind.startsWith('worker-'));
+    expect(long.length).toBeGreaterThan(300);
+    expect(t.map((x: any) => [x.kind, x.text])).toEqual([
+      ['worker-user', 'What next?'], ['worker-text', long], ['worker-tool', 'Bash: ls'],
+    ]);
+    // A later run (e.g. after a failed start) does not hide the earlier run's messages.
+    const run2 = createRun(db, { goalId: g.id, cwd: '/tmp' });
+    addEvent(db, run2.id, { kind: 'user', summary: 'Second try', detail: 'Second try' });
+    const t2 = (await req('GET', `/api/goals/${g.id}`)).json.timeline.filter((x: any) => x.kind === 'worker-user');
+    expect(t2.map((x: any) => x.text)).toEqual(['What next?', 'Second try']);
   });
 
   it('answer/dismiss call answersUpdated; approvals and worker actions reach the worker control', async () => {
