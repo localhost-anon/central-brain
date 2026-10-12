@@ -66,6 +66,15 @@ export function listEvents(db: BrainDb, runId: string, opts: { limit?: number } 
   return rows.reverse();
 }
 
+/** The latest events across every run of a goal, oldest first, so a new run does not hide earlier messages. */
+export function listGoalEvents(db: BrainDb, goalId: string, opts: { limit?: number } = {}): WorkerEvent[] {
+  const rows = db.select({ e: workerEvents }).from(workerEvents)
+    .innerJoin(workerRuns, eq(workerRuns.id, workerEvents.runId))
+    .where(eq(workerRuns.goalId, goalId))
+    .orderBy(desc(workerEvents.id)).limit(opts.limit ?? 200).all();
+  return rows.map(r => r.e).reverse();
+}
+
 export function riskForTool(toolName: string): 'HIGH' | 'MEDIUM' {
   return ['Bash', 'WebFetch', 'WebSearch'].includes(toolName) ? 'HIGH' : 'MEDIUM';
 }

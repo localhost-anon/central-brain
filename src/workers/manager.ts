@@ -26,8 +26,15 @@ export interface WorkerControl {
   resume(goalId: string): WorkerRun;
   answersUpdated(goalId: string): void;
   decide(approvalId: number, decision: 'allow' | 'deny', note?: string): Approval;
+  send(goalId: string, text: string, opts?: { cwd?: string }): SendResult;
   stopAll(): void;
 }
+
+/** How a user message reached the worker: written now, held until the current turn ends, or carried by a (re)started run. */
+export interface SendResult { delivery: 'sent' | 'queued' | 'resumed' | 'started'; run: WorkerRun }
+
+export const MAX_MESSAGE_CHARS = 4000;
+const withUserMessage = (first: string, text: string) => `${first}\n\nMessage from the user:\n${text}`;
 
 export function readMaxWorkers(configPath = path.join(os.homedir(), '.central-brain', 'config.json')): number {
   try {
@@ -38,6 +45,10 @@ export function readMaxWorkers(configPath = path.join(os.homedir(), '.central-br
 
 interface Live {
   child: ChildProcessWithoutNullStreams; goalId: string; nudged: boolean; stderr: string; ended: boolean;
+  /** A user message is out and its `result` has not arrived yet. */
+  inTurn: boolean;
+  /** User messages sent mid-turn; delivered one per turn end, before any nudge. */
+  queue: string[];
   killTimer?: NodeJS.Timeout;
 }
 const now = () => new Date().toISOString();
@@ -120,12 +131,74 @@ export class WorkerManager implements WorkerControl {
     if (l) {
       this.setStatus(run.id, 'working');   // set first: a duplicate call now returns early
       l.nudged = false;
-      this.write(l, userMessage(answersMessage(goalId)));
+      this.turn(l, answersMessage(goalId));
     } else {
       this.pendingFirst.set(run.id, answersMessage(goalId));
       this.setStatus(run.id, 'queued');
       this.pump();
     }
+  }
+
+  /**
+   * A free-text message from the user (phase 4). A live worker between turns gets it at once; a
+   * worker mid-turn gets it when the turn ends; a goal with no live worker resumes the last session
+   * with it as first input, or starts a new worker. The message is stored as a 'user' event only
+   * once it is delivered or queued, so a refused message leaves no trace.
+   */
+  send(goalId: string, text: string, o: { cwd?: string } = {}): SendResult {
+    const msg = text.trim();
+    if (!msg) throw new Error('Message is empty');
+    if (msg.length > MAX_MESSAGE_CHARS) throw new Error(`Message is longer than ${MAX_MESSAGE_CHARS} characters`);
+    const goal = getGoal(this.db, goalId);
+    let delivery: SendResult['delivery'];
+    let runId: string;
+    const active = activeRunForGoal(this.db, goalId);
+    if (active) {
+      runId = active.id;
+      const l = this.live.get(active.id);
+      if (active.status === 'queued') {
+        this.pendingFirst.set(active.id, withUserMessage(this.pendingFirst.get(active.id) ?? resumeMessage(goalId), msg));
+        delivery = 'queued';
+      } else if (!l || l.ended || !l.child.stdin.writable) {
+        throw new Error('The worker process is gone. Stop it, then send the message again to resume it.');
+      } else if (l.inTurn) {
+        l.queue.push(msg);
+        delivery = 'queued';
+      } else {
+        this.deliver(active.id, l, msg);
+        delivery = 'sent';
+      }
+    } else {
+      const last = listRuns(this.db, goalId).find(r => r.sessionId);
+      if (last) {
+        if (this.live.has(last.id)) throw new Error(`Worker for ${goalId} is still shutting down; try again in a moment.`);
+        this.pendingFirst.set(last.id, msg);
+        this.setStatus(last.id, 'queued', { exitReason: null, endedAt: null });
+        runId = last.id;
+        delivery = 'resumed';
+      } else {
+        const run = createRun(this.db, { goalId, cwd: o.cwd ?? this.opts.defaultCwd });
+        this.pendingFirst.set(run.id, withUserMessage(firstMessage(goal), msg));
+        this.emit({ type: 'run-changed', goalId, runId: run.id, status: 'queued' });
+        runId = run.id;
+        delivery = 'started';
+      }
+    }
+    this.emit({ type: 'worker-event', goalId, runId, event: addEvent(this.db, runId, { kind: 'user', summary: msg, detail: msg }) });
+    if (delivery === 'resumed' || delivery === 'started') this.pump();
+    return { delivery, run: getRun(this.db, runId) };
+  }
+
+  /** Writes a user message that starts a new turn. */
+  private deliver(runId: string, l: Live, text: string): void {
+    l.nudged = false;
+    this.turn(l, text);
+    this.setStatus(runId, 'working');
+  }
+
+  private turn(l: Live, text: string): void {
+    l.inTurn = true;
+    this.write(l, userMessage(text));
   }
 
   decide(approvalId: number, decision: 'allow' | 'deny', note?: string): Approval {
@@ -150,7 +223,7 @@ export class WorkerManager implements WorkerControl {
     const [bin, ...pre] = this.command;
     const args = [...pre, ...workerArgs({ systemPrompt: workerSystemPrompt(run.goalId), resumeSessionId: run.sessionId ?? undefined })];
     const child = spawn(bin!, args, { cwd: run.cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
-    const l: Live = { child, goalId: run.goalId, nudged: false, stderr: '', ended: false };
+    const l: Live = { child, goalId: run.goalId, nudged: false, stderr: '', ended: false, inTurn: false, queue: [] };
     this.live.set(run.id, l);
     this.setStatus(run.id, 'starting', { pid: child.pid ?? null, startedAt: now(), endedAt: null });
     child.stderr.on('data', (d: Buffer) => { l.stderr = (l.stderr + d.toString()).slice(-2048); });
@@ -159,7 +232,7 @@ export class WorkerManager implements WorkerControl {
     child.on('exit', code => this.onExit(run.id, l, code));
     child.on('error', err => this.onSpawnError(run.id, l, err));
     this.write(l, initializeRequest());
-    this.write(l, userMessage(this.pendingFirst.get(run.id) ?? resumeMessage(run.goalId)));
+    this.turn(l, this.pendingFirst.get(run.id) ?? resumeMessage(run.goalId));
     this.pendingFirst.delete(run.id);
   }
 
@@ -185,7 +258,11 @@ export class WorkerManager implements WorkerControl {
   }
 
   private onTurnEnd(runId: string, l: Live): void {
+    l.inTurn = false;
     if (END_STATES.includes(getRun(this.db, runId).status)) return;
+    // A message the user sent mid-turn goes first; it replaces the nudge for this turn end.
+    const next = l.queue.shift();
+    if (next !== undefined) { this.deliver(runId, l, next); return; }
     const goalStatus = getGoal(this.db, l.goalId).status;
     if (goalStatus === 'COMPLETED') {
       this.finish(runId, l, 'completed', null);
@@ -196,7 +273,7 @@ export class WorkerManager implements WorkerControl {
       this.setStatus(runId, 'waiting_answers');
     } else if (!l.nudged) {
       l.nudged = true;
-      this.write(l, userMessage(nudgeMessage(l.goalId)));
+      this.turn(l, nudgeMessage(l.goalId));
       this.setStatus(runId, 'working');
     } else {
       this.finish(runId, l, 'stopped', 'stalled');

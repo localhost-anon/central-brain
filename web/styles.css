@@ -194,3 +194,7 @@ details.contract[open] > summary::after { content: "Hide"; }
   .goal-head h2 { font-size: 19px; }
 }
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+
+/* ---------- worker chat (phase 4) ---------- */
+.composer.chat { margin-top: 16px; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); }
+.composer.chat textarea { min-height: 44px; max-height: 40dvh; resize: none; font-size: 16px; }

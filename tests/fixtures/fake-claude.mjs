@@ -22,7 +22,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.type !== 'user') return;
   turn += 1;
   if (turn === 1) out({ type: 'system', subtype: 'init', session_id: 'fake-session-1' });
-  out({ type: 'assistant', message: { content: [{ type: 'text', text: `working turn ${turn}` }] } });
+  const pad = Number(process.env.FAKE_TEXT_LEN ?? 0);
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: `working turn ${turn}` + 'x'.repeat(pad) }] } });
   out('not json at all');
   if (scenario === 'crash') { process.exit(3); }
   if (scenario === 'permission' && turn === 1) {
@@ -30,7 +31,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     out({ type: 'control_request', request_id: 'r-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'git push' }, description: 'Push' } });
     return;
   }
-  result();
+  const delay = Number(process.env.FAKE_DELAY_MS ?? 0);
+  if (delay) setTimeout(result, delay); else result();
 });
 process.stdin.on('end', () => process.exit(0));
 
