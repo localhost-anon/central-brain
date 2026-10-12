@@ -180,7 +180,9 @@ Without the file, the notifier is off and `ui.log` says `notifier off`. If ntfy 
 | Stopped, finished or failed | Brain resumes the last worker session with your message as the first input. |
 | Never started | Brain starts a worker with the goal brief plus your message. |
 
-The thread shows your messages as "You", the worker's full text replies, and tool calls as one-line events. It covers every run of the goal. A message sends no push. When a message cannot reach the worker (the process is gone, or it is still shutting down), the UI shows the error and Brain stores nothing.
+The thread shows your messages as "You", the worker's full text replies, and tool calls as one-line events. It covers every run of the goal. A message sends no push.
+
+Your messages and worker replies render basic markdown: bold, italic, inline code, code blocks, bullet and numbered lists, links, and headings (as bold lines). Pipe tables stay as monospace text. Only `http`, `https` and `mailto` links are clickable, and they open in a new tab. All message text is HTML-escaped first, so a message cannot inject markup. Brain stores the original text unchanged. When a message cannot reach the worker (the process is gone, or it is still shutting down), the UI shows the error and Brain stores nothing.
 
 On the phone, install the ntfy app, add the server URL, log in, and subscribe to the topic. The server in this setup is on the tailnet only, so pushes arrive while Tailscale is on.
 

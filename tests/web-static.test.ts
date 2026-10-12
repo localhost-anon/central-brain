@@ -14,6 +14,8 @@ describe('static UI', () => {
       expect(js).toContain(route);
     }
     expect(js).toContain('function esc(');
+    expect(js).toContain("import { renderMarkdown } from './markdown.js'");
+    execFileSync(process.execPath, ['--check', 'web/markdown.js']);
     expect(js).toContain('function hasDraft(');
     expect(js).toContain('workerError');
     expect(html.includes('id="stale"') || js.includes('id="stale"')).toBe(true);

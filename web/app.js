@@ -1,6 +1,8 @@
 // Central Brain UI — framework-free. All server data is escaped with esc() before rendering.
 // Layout: project sidebar (a drawer on phones) + one reading column. Goal detail reads as a
 // thread: the worker on the left, you on the right, Brain events quietly in the middle.
+import { renderMarkdown } from './markdown.js';
+
 const view = document.getElementById('view');
 const needsEl = document.getElementById('needs');
 const banner = document.getElementById('banner');
@@ -243,8 +245,9 @@ function threadItem(t) {
       : '<div class="reply wait">Waiting for your answer</div>';
     return `<div class="msg worker qa"><span class="who">Question</span>${text}${reply}</div>`;
   }
-  if (t.kind === 'worker-user') return `<div class="msg me"><span class="who">You</span>${text}</div>`;
-  if (t.kind.startsWith('worker-') && /assistant|text|message/.test(t.kind)) return `<div class="msg worker"><span class="who">Worker</span>${text}</div>`;
+  // Chat bubbles render markdown (renderMarkdown escapes all input); events and notes stay plain text.
+  if (t.kind === 'worker-user') return `<div class="msg me"><span class="who">You</span><div class="md">${renderMarkdown(t.text)}</div></div>`;
+  if (t.kind.startsWith('worker-') && /assistant|text|message/.test(t.kind)) return `<div class="msg worker"><span class="who">Worker</span><div class="md">${renderMarkdown(t.text)}</div></div>`;
   if (t.kind === 'goal' || t.kind.startsWith('worker-')) return `<div class="event"><time>${esc(clock(t.ts))}</time>${text}</div>`;
   const cls = t.kind === 'failure' || t.kind === 'verify-failed' ? 'bad' : t.kind === 'verified' ? 'ok' : '';
   const tag = { decision: 'Decided', verified: 'Verified', failure: 'Failed', 'verify-failed': 'Check failed' }[t.kind] ?? '';
